@@ -1,0 +1,5 @@
+# Audio credits
+
+- **Fajr Athan, Malmö Mosque, August 19, 2012**. Muazzin Besim Azemi. Recording by Islamic Center Malmö, [original recording](https://www.youtube.com/watch?v=0IHfm4Y82xA), [Wikimedia Commons source](https://commons.wikimedia.org/wiki/File:Eid_al-Fitr_Fajr_azan_at_Malm%C3%B6_Mosque_-_19_August_2012.webm), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The Opus audio stream was extracted and repackaged without re-encoding.
+- **Call to prayer from the Prophet’s Mosque**. Recording credited to ejaz215. [Wikimedia Commons source](https://commons.wikimedia.org/wiki/File:33937_ejaz215_call-to-prayer-from-the-prophet-s-mo.ogg), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The Ogg file is unchanged.
+- **Mishari Rashid Alafasy, “Yet Another Adhan.”** [Aladhan download catalog](https://aladhan.com/download-adhans) offers the [MP3](https://cdn.aladhan.com/audio/adhans/a9.mp3) for download. Setup can download it directly into the user's local library. It is stored outside the repository. Permission to redistribute this recording with the application has not been verified.

@@ -1,0 +1,8 @@
+{
+  "name": "athanbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "setup": "node src/main.js setup", "test": "node --test" }
+}
