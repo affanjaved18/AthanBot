@@ -34,3 +34,15 @@ dd { margin: 0; }
 #message:empty { display: none; }
 #message.error { color: #7c1f1f; background: #f9dddd; }
 @media (max-width: 34rem) { .grid { grid-template-columns: 1fr; } }
+#steps { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }
+#steps button { border-color: transparent; background: transparent; }
+#steps button[aria-current=step] { background: #dcebe0; border-color: #b4cdbb; font-weight: 650; }
+.wizard-actions { justify-content: space-between; }
+.wizard-actions #next { margin-left: auto; }
+#found-city:empty { display: none; }
+
+.desktop main { padding-top: .9rem; }
+.desktop header { padding: .25rem 0 .6rem; }
+.desktop header p { margin: .25rem 0 .55rem; }
+.desktop h1 { font-size: 2.4rem; }
+.desktop .wizard-actions { padding-bottom: .35rem; }

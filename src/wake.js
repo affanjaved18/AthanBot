@@ -1,6 +1,7 @@
 import { run } from './audio.js';
 
-export const wakeLead = 45_000;
+// A closed Mac can return to sleep after only a short maintenance wake.
+export const wakeLead = 10_000;
 const helper = '/Library/PrivilegedHelperTools/org.athanbot.wake';
 
 export async function syncWake(scope, timestamps) {

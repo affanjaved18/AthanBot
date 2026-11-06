@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>AthanBot</string>
+  <key>CFBundleDisplayName</key><string>AthanBot</string>
+  <key>CFBundleExecutable</key><string>AthanBot</string>
+  <key>CFBundleIdentifier</key><string>org.athanbot.app</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleIconFile</key><string>AthanBot</string>
+  <key>LSMinimumSystemVersion</key><string>13.5</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>AthanBot uses Bluetooth to reconnect to your selected speaker before playing the Athan.</string>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>
+</plist>

@@ -62,7 +62,7 @@ test('deduplicates concurrent playback and restart using a persistent claim', as
   const audio = { default: 'regular', fajr: 'morning' };
   const io = {
     claim: (target, status) => claimEvent(directory, target, status),
-    ready: async () => 'preferred-device',
+    withOutput: async (_, __, play) => play('preferred-device'),
     playback: async (...args) => plays.push(args),
     report: () => {},
     now: () => 5500,
@@ -87,7 +87,7 @@ test('handles stale, recent and future events after sleep or a clock change', as
   const reports = [];
   await dispatch(stale, {}, {
     claim: async (_, status) => status === 'missed',
-    ready: async () => assert.fail('Stale prayers must not start audio'),
+    withOutput: async () => assert.fail('Stale prayers must not start audio'),
     report: message => reports.push(message),
     now: () => now,
   });
@@ -97,9 +97,9 @@ test('handles stale, recent and future events after sleep or a clock change', as
 test('drops a playback if its speaker only becomes ready after the deadline', async () => {
   let now = 5000;
   const reports = [];
-  await dispatch({ id: 'event', at: now, prayer: 'isha' }, {}, {
+  await dispatch({ id: 'event', at: now, prayer: 'isha' }, { audio: { default: 'regular' } }, {
     claim: async () => true,
-    ready: async (_, deadline) => { now = deadline; return 'preferred'; },
+    withOutput: async (_, deadline, play) => { now = deadline; await play('preferred'); },
     playback: async () => assert.fail('Expired playback'),
     report: message => reports.push(message),
     now: () => now,

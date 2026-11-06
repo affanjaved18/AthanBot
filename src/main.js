@@ -1,7 +1,7 @@
 import { setup } from './setup/server.js';
 import { readSettings } from './settings.js';
 import { upcomingDays } from './prayers.js';
-import { outputs, play, readyOutput, trackPath } from './audio.js';
+import { outputs, play, trackPath, withPlaybackOutput } from './audio.js';
 import { runScheduler } from './scheduler.js';
 import { scheduleSleepTest } from './sleep.js';
 import { startup } from './startup.js';
@@ -14,6 +14,9 @@ async function configured() {
 
 async function main([command, arg, extra]) {
   switch (command) {
+    case 'app-setup':
+      await setup(0, { desktop: true });
+      break;
     case 'setup': {
       const port = arg === undefined ? 0 : Number(arg);
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid setup port.');
@@ -42,15 +45,17 @@ async function main([command, arg, extra]) {
     case 'test-audio': {
       const settings = await configured();
       const track = arg ? settings.audio[arg] || settings.audio.default : settings.audio.default;
-      await play(trackPath(track), await readyOutput({ ...settings, fallback: '' }));
+      const file = trackPath(track);
+      await withPlaybackOutput({ ...settings, fallback: '' }, undefined, device => play(file, device));
       break;
     }
     case 'sleep-test': {
       const chime = extra === '--chime';
-      const test = await scheduleSleepTest(chime ? {} : await configured(), Number(arg ?? 180), chime);
+      const settings = chime ? {} : await configured();
+      const test = await scheduleSleepTest(settings, Number(arg ?? 180), chime, extra);
       console.log(`Playback is scheduled for ${new Date(test.at).toLocaleString()}. Close the lid and leave this process running.`);
-      await test.finish();
-      console.log('Playback finished. Confirm that you heard it without opening the lid.');
+      const finished = await test.finish();
+      console.log(finished === false ? 'Athan stopped.' : 'Playback finished. Confirm that you heard it without opening the lid.');
       break;
     }
     case 'enable':
@@ -62,7 +67,7 @@ async function main([command, arg, extra]) {
       console.log('Automatic startup disabled.');
       break;
     default:
-      console.log('AthanBot commands: setup [port], run, times [days], outputs, test-audio [prayer], sleep-test [seconds] [--chime], enable, disable');
+      console.log('AthanBot commands: setup [port], run, times [days], outputs, test-audio [prayer], sleep-test [seconds] [--chime|fajr], enable, disable');
       if (command && command !== '--help') process.exitCode = 1;
   }
 }

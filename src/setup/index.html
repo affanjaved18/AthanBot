@@ -10,13 +10,27 @@
 <body>
   <main>
     <header>
-      <p class="eyebrow">One-time setup</p>
+      <p class="eyebrow" id="mode">One-time setup</p>
       <h1>AthanBot</h1>
       <p>Set the prayer times and choose where the Athan plays.</p>
+      <button type="button" id="stop-playback">Stop Athan</button>
     </header>
+    <nav id="steps" aria-label="Setup steps" hidden>
+      <button type="button" data-step="0">1. Location</button>
+      <button type="button" data-step="1">2. Audio</button>
+      <button type="button" data-step="2">3. Schedule</button>
+    </nav>
     <form id="settings" hidden>
-      <section>
+      <section data-page="0">
         <h2>Location and prayer times</h2>
+        <div id="city-lookup" hidden>
+          <p>Find your city or enter coordinates below. City search uses Apple’s location service.</p>
+          <div class="actions">
+            <label>City and state or country <input id="city" placeholder="e.g. Toronto, Canada"></label>
+            <button type="button" id="find-city">Find city</button>
+          </div>
+          <p id="found-city"></p>
+        </div>
         <div class="grid">
           <label>Latitude <input name="latitude" type="number" min="-90" max="90" step="any" required></label>
           <label>Longitude <input name="longitude" type="number" min="-180" max="180" step="any" required></label>
@@ -47,47 +61,62 @@
         <dl id="times" class="times" hidden></dl>
       </section>
 
-      <section>
+      <section data-page="1">
         <h2>Recordings</h2>
         <p>Use Mishari Rashid Alafasy as your default, choose from the bundled library, or import your own files.</p>
         <div class="actions">
           <button type="button" id="alafasy">Download Alafasy as default</button>
           <label class="file-button">Import audio <input id="import" type="file"></label>
         </div>
-        <div id="tracks" class="grid"></div>
+        <div id="default-track" class="grid"></div>
+        <details>
+          <summary>Different recordings by prayer</summary>
+          <div id="tracks" class="grid"></div>
+        </details>
       </section>
 
-      <section>
+      <section data-page="1">
         <h2>Speaker</h2>
         <p>Connect a wired speaker or pair a Bluetooth speaker in system settings, then refresh the list.</p>
         <div class="grid">
           <label>Preferred output <select name="device"></select></label>
           <label>Fallback output <select name="fallback"></select></label>
-          <label class="wide">Bluetooth address for automatic reconnect
+          <label class="wide" id="bluetooth-address">Bluetooth address for automatic reconnect
             <input name="bluetoothAddress" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off">
           </label>
+          <label class="wide" id="paired-picker" hidden>Bluetooth speaker to connect for playback
+            <select id="paired"></select>
+          </label>
         </div>
+        <p id="bluetooth-playback-note" hidden>Connect the speaker once in Bluetooth settings and refresh this list. Select it as both the preferred output and the Bluetooth speaker. AthanBot disconnects it after playback, so you can leave it disconnected between prayers.</p>
         <div class="actions">
+          <button type="button" id="bluetooth-settings" hidden>Open Bluetooth settings</button>
           <button type="button" id="devices">Refresh speakers</button>
           <button type="button" id="play">Test playback</button>
+          <button type="button" id="play-now" hidden>Play Athan now</button>
         </div>
+      </section>
+
+      <section data-page="2">
+        <h2>Automatic playback</h2>
+        <label class="check"><input type="checkbox" name="enable" checked> Enable automatic startup</label>
+        <p id="startup-note">AthanBot will keep running after you close setup. Return here to edit settings.</p>
         <div id="mac" hidden>
           <label class="check"><input type="checkbox" name="wake"> Schedule Mac wake alarms</label>
-          <p>The Mac wake helper must be installed. Test with the lid closed and the charger unplugged.</p>
+          <p id="wake-instructions">Test with the lid closed and the charger unplugged.</p>
+          <button type="button" id="install-wake" hidden>Enable sleep playback…</button>
           <div class="actions">
             <label>Sleep test delay in minutes <input name="sleepDelay" type="number" min="2" max="720" value="3"></label>
             <button type="button" id="sleep">Test sleep playback</button>
             <button type="button" id="sleep-status">Check test result</button>
           </div>
         </div>
-      </section>
-
-      <section>
-        <h2>Automatic playback</h2>
-        <label class="check"><input type="checkbox" name="enable" checked> Enable automatic startup</label>
-        <p>AthanBot will keep running after you close setup. Return here to edit settings.</p>
         <button type="submit" class="primary">Save setup</button>
       </section>
+      <div class="actions wizard-actions" id="wizard-actions" hidden>
+        <button type="button" id="back">Back</button>
+        <button type="button" id="next" class="primary">Continue</button>
+      </div>
     </form>
     <p id="message" role="status" aria-live="polite">Loading setup…</p>
   </main>

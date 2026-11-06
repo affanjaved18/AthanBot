@@ -1,6 +1,7 @@
-import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { dataDir } from './settings.js';
 import { run } from './audio.js';
@@ -33,6 +34,7 @@ function macService() {
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>${xml(paths)}</string>
     <key>ATHANBOT_DATA_DIR</key><string>${xml(dataDir)}</string>
+    ${process.env.ATHANBOT_MAC_AUDIO ? '<key>ATHANBOT_MAC_AUDIO</key><string>' + xml(process.env.ATHANBOT_MAC_AUDIO) + '</string>' : ''}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -64,33 +66,78 @@ WantedBy=default.target
   return { file, contents };
 }
 
+export async function startupEnabled() {
+  const { file } = process.platform === 'darwin' ? macService() : linuxService();
+  try {
+    await access(file);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function macServiceLoaded(target) {
+  try {
+    await run('/bin/launchctl', ['print', target]);
+    return true;
+  } catch (error) {
+    if (error.code === 113) return false; // launchctl could not find the service.
+    throw error;
+  }
+}
+
+async function waitForMacServiceRemoval(target) {
+  // bootout can return while launchd is still stopping the process.
+  const deadline = performance.now() + 10_000;
+  while (await macServiceLoaded(target)) {
+    if (performance.now() >= deadline) throw new Error('AthanBot’s background service is still stopping. Try saving again.');
+    await delay(100);
+  }
+}
+
 export async function startup(settings, enable) {
   const mac = process.platform === 'darwin';
   if (!mac && process.platform !== 'linux') throw new Error('Automatic startup supports macOS and systemd Linux.');
   const { domain, file, contents } = mac ? macService() : linuxService();
+  const target = mac ? domain + '/' + label : undefined;
   if (enable) {
     if (mac && settings.wake) {
       // Check that the optional, administrator-installed helper is available without touching the daily alarms.
       await syncWake('check', []).catch(() => {
-        throw new Error('Install the Mac wake helper before enabling sleep playback. See the README.');
+        throw new Error('Enable sleep playback in AthanBot before turning on scheduled Mac wake-ups.');
       });
     }
     await mkdir(dataDir, { recursive: true, mode: 0o700 });
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(file, contents, { mode: 0o644 });
     if (mac) {
-      await run('/bin/launchctl', ['bootout', domain + '/' + label]).catch(() => {});
-      await run('/bin/launchctl', ['enable', domain + '/' + label]);
-      await run('/bin/launchctl', ['bootstrap', domain, file]);
+      const previous = await readFile(file, 'utf8').catch(error => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+      const loaded = await macServiceLoaded(target);
+      // The scheduler reads saved settings itself. Reload only when the job definition changes.
+      if (previous !== contents || !loaded) {
+        if (loaded) {
+          await run('/bin/launchctl', ['bootout', target]);
+          await waitForMacServiceRemoval(target);
+        }
+        if (previous !== contents) await writeFile(file, contents, { mode: 0o644 });
+        await run('/bin/launchctl', ['enable', target]);
+        await run('/bin/launchctl', ['bootstrap', domain, file]);
+      }
       if (!settings.wake) await syncWake('schedule', []).catch(() => {});
     } else {
+      await writeFile(file, contents, { mode: 0o644 });
       await run('systemctl', ['--user', 'daemon-reload']);
       await run('systemctl', ['--user', 'enable', 'athanbot.service']);
       await run('systemctl', ['--user', 'restart', 'athanbot.service']);
     }
   } else {
     if (mac) {
-      await run('/bin/launchctl', ['bootout', domain + '/' + label]).catch(() => {});
+      if (await macServiceLoaded(target)) {
+        await run('/bin/launchctl', ['bootout', target]);
+        await waitForMacServiceRemoval(target);
+      }
       for (const scope of ['schedule', 'test']) await syncWake(scope, []).catch(() => {});
     } else {
       await run('systemctl', ['--user', 'disable', '--now', 'athanbot.service']).catch(() => {});

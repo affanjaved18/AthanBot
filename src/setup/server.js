@@ -2,10 +2,11 @@ import { access, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { audioExtensions, defaults, highLatitudeRules, methods, outputSettings, polarRules, prayers, readSettings, saveSettings, validate } from '../settings.js';
-import { importTrack, listTracks, maxAudioBytes, outputs, play, readyOutput, trackPath } from '../audio.js';
+import { importTrack, listTracks, maxAudioBytes, outputs, pairedBluetooth, play, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
 import { upcomingDays } from '../prayers.js';
-import { startup } from '../startup.js';
+import { startup, startupEnabled } from '../startup.js';
 import { scheduleSleepTest } from '../sleep.js';
+import { syncWake } from '../wake.js';
 
 const alafasy = {
   id: 'download-alafasy',
@@ -35,7 +36,7 @@ function send(response, payload, status = 200) {
   response.end(JSON.stringify(payload));
 }
 
-export async function setup(port = 0) {
+export async function setup(port = 0, { desktop = false } = {}) {
   const token = randomBytes(32).toString('hex');
   let sleepTest;
   let testingAudio = false;
@@ -74,13 +75,19 @@ export async function setup(port = 0) {
       }
 
       if (url.pathname === '/state') {
-        const devices = await outputs().catch(error => ({ error: error.message }));
+        const [devices, saved, enabled] = await Promise.all([
+          outputs().catch(error => ({ error: error.message })), readSettings(), desktop ? startupEnabled() : false,
+        ]);
         return send(response, {
-          settings: await readSettings() || defaults, library: await listTracks(), devices,
+          settings: saved || defaults, configured: Boolean(saved), enabled, desktop, library: await listTracks(), devices,
           recommended: { id: alafasy.id, label: alafasy.label },
-          methods, highLatitudeRules, polarRules, prayers, audioExtensions, mac: process.platform === 'darwin',
+          methods, highLatitudeRules, polarRules, prayers, audioExtensions: desktop ? audioExtensions.filter(extension => !['ogg', 'opus'].includes(extension)) : audioExtensions, mac: process.platform === 'darwin',
           timeZones: Intl.supportedValuesOf('timeZone'),
         });
+      }
+      if (desktop && url.pathname === '/paired') return send(response, await pairedBluetooth());
+      if (desktop && url.pathname === '/wake-status') {
+        return send(response, { available: await syncWake('check', []).then(() => true, () => false) });
       }
       if (url.pathname === '/devices') return send(response, await outputs());
       if (url.pathname === '/upload') {
@@ -100,13 +107,15 @@ export async function setup(port = 0) {
         if (testingAudio) throw new Error('Test playback is already running.');
         testingAudio = true;
         try {
-          const device = await readyOutput({ ...outputSettings(input), fallback: '' });
-          await play(trackPath(await resolveTrack(input.track)), device);
+          const settings = { ...outputSettings(input), fallback: '' };
+          const file = trackPath(await resolveTrack(input.track));
+          const finished = await withPlaybackOutput(settings, undefined, device => play(file, device, desktop && input.full !== true));
+          return send(response, { ok: true, stopped: finished === false });
         } finally {
           testingAudio = false;
         }
-        return send(response, { ok: true });
       }
+      if (url.pathname === '/stop-playback') return send(response, { stopped: await stopPlayback() });
       if (url.pathname === '/sleep') {
         if (sleepTest?.running) throw new Error('A sleep test is already scheduled.');
         sleepTest = { running: true };
@@ -116,8 +125,8 @@ export async function setup(port = 0) {
           await access(trackPath(track));
           const test = await scheduleSleepTest(settings, Number(input.seconds));
           sleepTest.at = test.at;
-          void test.finish().then(() => { sleepTest.result = 'Playback finished. Confirm you heard it.'; })
-            .catch(error => { sleepTest.result = error.message; })
+          void test.finish().then(finished => { sleepTest.result = finished === false ? 'Athan stopped.' : 'Playback finished. Confirm you heard it.'; })
+            .catch(error => { sleepTest.result = error.stderr?.trim() || error.message; })
             .finally(() => { sleepTest.running = false; });
           return send(response, sleepTest);
         } catch (error) {
@@ -136,9 +145,12 @@ export async function setup(port = 0) {
           if (useAlafasy) settings.audio.default = await getAlafasy();
           await Promise.all(Object.values(settings.audio).map(id => access(trackPath(id))));
           const saved = await saveSettings(settings);
-          if (input.enable === true) await startup(saved, true).catch(error => {
-            throw new Error('Settings saved. Automatic startup could not be enabled. ' + error.message);
-          });
+          try {
+            if (input.enable === true) await startup(saved, true);
+            else if (desktop && input.enable === false && await startupEnabled()) await startup(saved, false);
+          } catch (error) {
+            throw new Error('Settings were saved, but the background playback setting could not be applied. ' + error.message);
+          }
           return send(response, { settings: saved, library: await listTracks() });
         } finally {
           saving = false;
@@ -154,6 +166,7 @@ export async function setup(port = 0) {
     server.listen(port, '127.0.0.1', resolve);
   });
   const url = `http://127.0.0.1:${server.address().port}/#${token}`;
-  console.log('Open this address in your browser. Press Ctrl+C when setup is finished.\n' + url);
+  if (desktop) console.log(url);
+  else console.log('Open this address in your browser. Press Ctrl+C when setup is finished.\n' + url);
   return { server, url };
 }

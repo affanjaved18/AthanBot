@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { addDays, calculateDay, localDay } from './prayers.js';
 import { dataDir, readSettings } from './settings.js';
-import { play, prepareAudio, readyOutput, trackPath } from './audio.js';
+import { play, preparePlayback, trackPath, withPlaybackOutput } from './audio.js';
 import { syncWake, wakeLead } from './wake.js';
 
 export const grace = 60_000;
@@ -30,7 +30,7 @@ export async function claimEvent(directory, event, status) {
 }
 
 export async function dispatch(event, settings, {
-  claim, ready, playback, report, now = Date.now,
+  claim, playback, report, now = Date.now, withOutput = withPlaybackOutput,
 }) {
   if (!await claim(event, now() - event.at >= grace ? 'missed' : 'attempted')) return;
   if (now() - event.at >= grace) {
@@ -38,12 +38,14 @@ export async function dispatch(event, settings, {
     return;
   }
   try {
-    const device = await ready(settings, event.at + grace);
-    if (now() - event.at >= grace) throw new Error('Playback window expired');
     const track = settings.audio[event.prayer] || settings.audio.default;
-    report(`Playing ${event.id} on ${device}.`);
-    await playback(track, device);
-    report(`Finished ${event.id}.`);
+    if (!track) throw new Error('Choose a default Athan recording.');
+    const finished = await withOutput(settings, event.at + grace, async device => {
+      if (now() - event.at >= grace) throw new Error('Playback window expired');
+      report(`Playing ${event.id} on ${device}.`);
+      return playback(track, device);
+    });
+    report(`${finished === false ? 'Stopped' : 'Finished'} ${event.id}.`);
   } catch (error) {
     report(`Playback failed for ${event.id}: ${error.message}`);
   }
@@ -112,7 +114,6 @@ export async function runScheduler() {
         if (playing) active = true;
         void dispatch(event, settings, {
           claim: (target, status) => claimEvent(directory, target, status),
-          ready: readyOutput,
           playback: (track, device) => play(trackPath(track), device),
           report,
         }).catch(error => {
@@ -125,7 +126,7 @@ export async function runScheduler() {
       const upcoming = events.find(event => event.at > now && event.at - now <= wakeLead && !seen.has(event.id));
       if (upcoming && !active && !prepared.has(upcoming.id)) {
         prepared.add(upcoming.id);
-        void prepareAudio(settings).catch(error => report(`Audio preparation: ${error.message}`));
+        void preparePlayback(settings).catch(error => report(`Playback preparation: ${error.message}`));
       }
       if (process.platform === 'darwin' && now >= retryWakeAt) {
         const wakes = settings.wake
