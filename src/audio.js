@@ -248,6 +248,26 @@ export async function playbackActive() {
   return (await playbackMarkers()).some(playbackOwnerAlive);
 }
 
+export async function currentPlayback() {
+  for (const entry of await playbackMarkers()) {
+    if (!playbackOwnerAlive(entry)) continue;
+    const contents = await readFile(join(activePlayback, entry), 'utf8').catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    if (contents === null) continue;
+    // A concurrent reader can see the marker before its contents have been written.
+    if (!contents) return {};
+    try {
+      return JSON.parse(contents);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      return {};
+    }
+  }
+  return null;
+}
+
 export async function stopPlayback() {
   let stopped = false;
   for (const entry of await playbackMarkers()) {
@@ -262,10 +282,10 @@ export async function stopPlayback() {
   return stopped;
 }
 
-async function runPlayback(executable, args, timeout) {
+async function runPlayback(executable, args, timeout, info) {
   await mkdir(activePlayback, { recursive: true, mode: 0o700 });
   const marker = join(activePlayback, `${process.pid}-${randomUUID()}`);
-  await writeFile(marker, '', { flag: 'wx', mode: 0o600 });
+  await writeFile(marker, info ? JSON.stringify(info) : '', { flag: 'wx', mode: 0o600 });
   const abort = new AbortController();
   // Removing this playback's marker lets the app stop a player owned by the scheduler.
   const poll = setInterval(() => {
@@ -290,7 +310,7 @@ async function runPlayback(executable, args, timeout) {
   }
 }
 
-export async function play(file, device, preview = false, volume = defaultVolume) {
+export async function play(file, device, preview = false, volume = defaultVolume, info) {
   await access(file);
   const legacyAudio = nativeAudio && /\.(ogg|opus)$/i.test(file);
   const timeout = 15 * 60 * 1000;
@@ -298,7 +318,7 @@ export async function play(file, device, preview = false, volume = defaultVolume
     const args = ['play', file, device];
     if (preview) args.push('preview');
     if (volume !== defaultVolume) args.push(String(volume));
-    return runPlayback(nativeAudio, args, preview ? 25000 : timeout);
+    return runPlayback(nativeAudio, args, preview ? 25000 : timeout, info);
   }
   // Existing CLI installations may have saved Ogg files and already have mpv.
   const executable = legacyAudio && !process.env.ATHANBOT_MPV
@@ -307,7 +327,7 @@ export async function play(file, device, preview = false, volume = defaultVolume
     throw new Error('Reimport this recording as MP3, M4A, or WAV to play it in the Mac app.');
   });
   const limit = preview ? ['--length=8'] : [];
-  return runPlayback(executable, [...common, ...limit, `--volume=${volume}`, '--audio-fallback-to-null=no', `--audio-device=${device}`, '--', file], timeout);
+  return runPlayback(executable, [...common, ...limit, `--volume=${volume}`, '--audio-fallback-to-null=no', `--audio-device=${device}`, '--', file], timeout, info);
 }
 
 export async function preparePlayback(settings) {

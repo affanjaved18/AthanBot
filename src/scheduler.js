@@ -52,7 +52,7 @@ export async function dispatch(event, settings, {
       output = selected ?? { id: device, label: device, fallback: device === settings.fallback };
       await history('playing', { output });
       if (now() - event.at >= grace) throw new Error('Playback window expired');
-      const finished = await playback(track, device);
+      const finished = await playback(track, device, output);
       outcome = finished === false ? 'stopped' : 'played';
     });
     await history(outcome, { output });
@@ -137,7 +137,9 @@ export async function runScheduler() {
         if (playing) active = true;
         void dispatch(event, settings, {
           claim: (target, status) => claimEvent(directory, target, status),
-          playback: (track, device) => play(trackPath(track), device, false, settings.volumes[event.prayer]),
+          playback: (track, device, output) => play(trackPath(track), device, false, settings.volumes[event.prayer] ?? settings.defaultVolume, {
+            kind: event.prayer ? 'prayer' : 'scheduled-test', prayer: event.prayer, output,
+          }),
           report, record: recordPlayback,
         }).catch(error => {
           seen.delete(event.id);

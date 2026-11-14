@@ -30,7 +30,7 @@ export const dataDir = resolve(process.env.ATHANBOT_DATA_DIR || defaultDataDir()
 export const defaults = {
   latitude: '', longitude: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   method: '', asr: '', highLatitude: 'MethodDefault', polar: 'Unresolved',
-  offsets: {}, audio: {}, volumes: {}, device: 'auto', fallback: '', bluetoothAddress: '', deviceLabel: '', fallbackLabel: '', wake: false,
+  offsets: {}, audio: {}, volumes: {}, defaultVolume, device: 'auto', fallback: '', bluetoothAddress: '', deviceLabel: '', fallbackLabel: '', wake: false,
 };
 
 function number(value, label, min, max) {
@@ -58,6 +58,12 @@ export function outputSettings(input) {
   }
   if (bluetoothAddress && device === 'auto') throw new Error('Choose the Bluetooth speaker as the preferred output.');
   return { device, fallback: fallback === device ? '' : fallback, bluetoothAddress };
+}
+
+export function playbackVolume(value = defaultVolume) {
+  const volume = number(value, 'volume', 0, 100);
+  if (!Number.isInteger(volume)) throw new Error('Volume must be a whole percentage.');
+  return volume;
 }
 
 export function validate(input) {
@@ -100,6 +106,7 @@ export function validate(input) {
   }
   return {
     latitude, longitude, timeZone, method, asr, highLatitude, polar, offsets, audio, volumes,
+    defaultVolume: playbackVolume(input.defaultVolume),
     ...outputSettings(input),
     deviceLabel: typeof input.deviceLabel === 'string' ? input.deviceLabel.trim().slice(0, 200) : '',
     fallbackLabel: typeof input.fallbackLabel === 'string' ? input.fallbackLabel.trim().slice(0, 200) : '',

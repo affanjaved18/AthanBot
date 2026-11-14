@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AthanBot setup</title>
   <link rel="icon" href="/athanbot.png" type="image/png">
+  <link rel="stylesheet" href="/vendor/web-awesome/theme.css">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <main>
-    <header class="app-header">
+  <div class="app-shell">
+    <aside class="sidebar">
       <div class="brand"><img src="/athanbot.png" width="42" height="42" alt=""><h1>AthanBot</h1></div>
       <nav id="navigation" aria-label="Main navigation" hidden>
         <button type="button" data-view="today">Today</button>
@@ -18,49 +19,68 @@
         <button type="button" data-view="history">History</button>
         <button type="button" data-view="settings">Settings</button>
       </nav>
-      <div class="header-actions">
+    </aside>
+    <main>
+      <div class="playback-bar" id="playback-bar" hidden>
+        <span id="now-playing" hidden></span>
         <button type="button" id="stop-playback" class="danger" hidden>Stop Athan</button>
       </div>
-    </header>
     <div id="today-view" hidden>
-      <div class="view-heading"><h2>Today</h2><p id="today-date"></p></div>
+      <div class="view-heading"><h2>Today</h2><div class="calendar-date"><p id="today-date"></p><p id="today-hijri"></p></div></div>
       <section class="next-card" aria-labelledby="next-label">
-        <p id="next-label">Next Athan</p>
+        <div class="next-content">
+          <p id="next-label">Next Athan</p>
         <h3 id="next-prayer"></h3>
         <p id="next-time" class="next-time"></p>
         <p id="next-date"></p>
+          <p id="next-countdown"></p>
+        </div>
         <div class="next-meta">
           <span id="scheduled-speaker"></span>
           <span id="scheduler-status" class="scheduler"></span>
         </div>
       </section>
-      <section class="panel" aria-labelledby="daily-title">
+      <div class="today-actions">
+        <div class="speaker-action">
+          <wa-button id="test-speaker" variant="brand" size="small">Test speaker</wa-button>
+          <span id="speaker-feedback" role="status"></span>
+        </div>
+        <div id="scheduler-help" hidden>
+          <p>Automatic playback is unavailable while the scheduler is offline.</p>
+          <button type="button" id="startup-settings" class="text-button">Open Startup settings</button>
+        </div>
+      </div>
+      <section class="list-section" aria-labelledby="daily-title">
         <div class="panel-heading"><h3 id="daily-title">Prayer times</h3><span id="today-zone"></span></div>
         <ul id="today-prayers" class="prayer-list"></ul>
       </section>
     </div>
     <div id="schedule-view" hidden>
       <div class="view-heading"><h2>Schedule</h2><p id="schedule-zone"></p></div>
-      <section class="panel" aria-labelledby="week-title">
+      <section class="list-section" aria-labelledby="week-title">
         <div class="panel-heading"><h3 id="week-title">Next seven days</h3></div>
         <div class="table-scroll" tabindex="0" role="region" aria-label="Seven-day prayer schedule">
           <table id="schedule-times"></table>
         </div>
         <div id="skip-action" class="skip-action" hidden>
           <span id="skip-prayer"></span>
-          <button type="button" id="skip-next">Skip next Athan</button>
-          <div id="confirm-skip" class="actions" hidden>
-            <button type="button" id="confirm-skip-button" class="danger">Confirm skip</button>
-            <button type="button" id="cancel-skip">Cancel</button>
-          </div>
+          <wa-button id="skip-next" appearance="plain" size="small">Skip next Athan</wa-button>
         </div>
+        <wa-dialog id="confirm-skip" label="Skip next Athan?">
+          <p id="skip-description"></p>
+          <p id="skip-error" role="alert"></p>
+          <wa-button slot="footer" appearance="plain" data-dialog="close" autofocus>Cancel</wa-button>
+          <wa-button slot="footer" id="confirm-skip-button" variant="danger">Skip once</wa-button>
+        </wa-dialog>
+        <p class="calendar-note">Hijri dates follow Umm al-Qura. Local moon sightings may differ.</p>
+
       </section>
     </div>
     <div id="history-view" hidden>
       <div class="view-heading"><h2>History</h2><p>Recent prayers and tests</p></div>
-      <section class="panel">
+      <section class="list-section">
         <p id="empty-history">Playback results will appear here.</p>
-        <ul id="playback-history" class="history"></ul>
+        <div id="playback-history"></div>
       </section>
     </div>
     <div id="settings-view" hidden>
@@ -81,7 +101,7 @@
           </div>
           <p id="found-city"></p>
         </div>
-        <div class="grid">
+        <div class="setting-rows">
           <label>Latitude <input name="latitude" type="number" min="-90" max="90" step="any" required></label>
           <label>Longitude <input name="longitude" type="number" min="-180" max="180" step="any" required></label>
           <label class="wide">Location time zone
@@ -118,14 +138,14 @@
       <section class="panel settings-panel" data-page="1">
         <h2>Speaker</h2>
         <p>Connect a wired speaker or pair a Bluetooth speaker in system settings, then refresh the list.</p>
-        <div class="grid">
-          <label>Preferred output <select name="device"></select></label>
-          <label>Fallback output <select name="fallback"></select></label>
+        <div class="setting-rows">
+          <label>Preferred output <wa-select name="device" aria-label="Preferred output" size="small"></wa-select></label>
+          <label>Fallback output <wa-select name="fallback" aria-label="Fallback output" size="small"></wa-select></label>
           <label class="wide" id="bluetooth-address">Bluetooth address for automatic reconnect
             <input name="bluetoothAddress" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off">
           </label>
           <label class="wide" id="paired-picker" hidden>Bluetooth speaker to connect for playback
-            <select id="paired"></select>
+            <wa-select id="paired" aria-label="Bluetooth speaker to connect for playback" size="small"></wa-select>
           </label>
         </div>
         <p id="bluetooth-playback-note" hidden>Connect the speaker once in Bluetooth settings and refresh this list. Select it as both the preferred output and the Bluetooth speaker. AthanBot disconnects it after playback, so you can leave it disconnected between prayers.</p>
@@ -146,25 +166,26 @@
           <button type="button" id="alafasy">Download Alafasy as default</button>
           <label class="file-button">Import audio <input id="import" type="file"></label>
         </div>
-        <div id="default-track" class="grid"></div>
+        <div id="default-track" class="setting-rows"></div>
+        <div class="setting-rows">
+          <label><span>Default volume <output id="default-volume-value">50%</output></span>
+            <wa-slider name="defaultVolume" aria-label="Default volume" min="0" max="100" step="1" value="50" with-tooltip></wa-slider>
+          </label>
+        </div>
         <details>
-          <summary>Different recordings by prayer</summary>
-          <div id="tracks" class="grid"></div>
-        </details>
-        <details>
-          <summary>Volume by prayer</summary>
-          <p>Leave a field blank to use the default 50% volume.</p>
-          <div id="volumes" class="grid"></div>
+          <summary>Recording and volume by prayer</summary>
+          <p>Leave a prayer’s volume blank to use the default.</p>
+          <div id="prayer-audio"></div>
         </details>
       </section>
 
       <section class="panel settings-panel" data-page="2">
         <h2>Automatic playback</h2>
-        <label class="check"><input type="checkbox" name="enable" checked> Enable automatic startup</label>
+        <label class="check"><span>Enable automatic startup</span><wa-switch name="enable" aria-label="Enable automatic startup" checked></wa-switch></label>
         <p id="startup-note">AthanBot will keep running after you close setup. Return here to edit settings.</p>
         <details id="mac" hidden>
           <summary>Advanced Mac wake settings</summary>
-          <label class="check"><input type="checkbox" name="wake"> Schedule Mac wake alarms</label>
+          <label class="check"><span>Schedule Mac wake alarms</span><wa-switch name="wake" aria-label="Schedule Mac wake alarms"></wa-switch></label>
           <p id="wake-instructions">Test with the lid closed and the charger unplugged.</p>
           <button type="button" id="install-wake" hidden>Enable sleep playback…</button>
           <div class="actions">
@@ -177,11 +198,13 @@
       <div class="actions wizard-actions">
         <button type="button" id="back">Back</button>
         <button type="button" id="next" class="primary">Continue</button>
+        <span id="unsaved-changes" role="status" hidden>Unsaved changes</span>
         <button type="submit" class="primary">Save changes</button>
       </div>
       </form>
     </div>
     <p id="message" role="status" aria-live="polite">Loading setup…</p>
-  </main>
+    </main>
+  </div>
 </body>
 </html>

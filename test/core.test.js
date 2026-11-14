@@ -65,7 +65,7 @@ test('deduplicates concurrent playback and restart using a persistent claim', as
   const io = {
     claim: (target, status) => claimEvent(directory, target, status),
     withOutput: async (_, __, play) => play('preferred-device'),
-    playback: async (...args) => plays.push(args),
+    playback: async (track, device) => plays.push([track, device]),
     report: () => {},
     now: () => 5500,
   };

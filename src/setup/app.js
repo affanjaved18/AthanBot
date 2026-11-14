@@ -1,7 +1,10 @@
+import './vendor/web-awesome/components.js';
+import { hijriDate } from './calendar.js';
+
 const token = location.hash.slice(1);
 const form = document.querySelector('#settings');
 const message = document.querySelector('#message');
-const field = name => form.elements.namedItem(name);
+const field = name => form.elements.namedItem(name) || form.querySelector('[name="' + name + '"]');
 const byId = id => document.getElementById(id);
 const names = { fajr: 'Fajr', dhuhr: 'Dhuhr', asr: 'Asr', maghrib: 'Maghrib', isha: 'Isha' };
 const methodNames = {
@@ -25,6 +28,7 @@ let historyKey;
 let scheduleKey;
 let nextAthan;
 let prayerToSkip;
+let savedDraft;
 const desktop = (action, data = {}) => window.webkit?.messageHandlers?.athanbot?.postMessage({ action, ...data });
 
 function showPage(next) {
@@ -102,6 +106,7 @@ window.athanbotLocationResult = result => {
   field('latitude').value = result.latitude;
   field('longitude').value = result.longitude;
   if (result.timeZone) field('timeZone').value = result.timeZone;
+  syncDraftIndicator();
   byId('found-city').textContent = 'Location found · ' + result.label;
   status('Check that this is your location before continuing.');
 };
@@ -135,8 +140,16 @@ function status(text, error = false) {
 }
 
 function options(select, entries, value) {
-  select.replaceChildren(...entries.map(({ id, label }) => new Option(label, id)));
-  if (entries.some(entry => entry.id === value)) select.value = value;
+  const items = entries.map(({ id, label }) => {
+    if (select.localName === 'select') return new Option(label, id);
+    const option = document.createElement('wa-option');
+    option.value = id || 'none';
+    option.textContent = label;
+    return option;
+  });
+  select.replaceChildren(...items);
+  const selected = entries.some(entry => entry.id === value) ? value : entries[0]?.id;
+  select.value = select.localName === 'wa-select' ? selected || 'none' : selected ?? '';
 }
 
 function dynamicField(parent, label, name, element) {
@@ -157,7 +170,7 @@ function library(entries, saved = {}) {
   }
 }
 
-function devices(entries, primary = field('device').value, fallback = field('fallback').value, labels = {}) {
+function devices(entries, primary = audioInput().device, fallback = audioInput().fallback, labels = {}) {
   for (const [id, savedLabel] of [[primary, labels.deviceLabel], [fallback, labels.fallbackLabel]]) {
     if (id && !entries.some(entry => entry.id === id)) {
       const label = savedLabel || id;
@@ -183,7 +196,7 @@ function input() {
 
 function speakerLabels() {
   return Object.fromEntries(['device', 'fallback'].map(name => [
-    name + 'Label', field(name).selectedOptions[0]?.textContent.replace(/ \((currently unavailable|connects at playback)\)$/, '') || '',
+    name + 'Label', field(name).selectedOptions?.[0]?.textContent.replace(/ \((currently unavailable|connects at playback)\)$/, '') || '',
   ]));
 }
 
@@ -199,7 +212,7 @@ function prayerTime(at, day, timeZone) {
   return time + (actual > day ? ' (+1 day)' : actual < day ? ' (−1 day)' : '');
 }
 
-function renderWeek(table, days, timeZone, next) {
+function renderWeek(table, days, timeZone, next, skipped = new Set()) {
   table.replaceChildren();
   const header = table.createTHead().insertRow();
   for (const name of ['Date', ...state.prayers.map(prayer => names[prayer])]) {
@@ -216,10 +229,14 @@ function renderWeek(table, days, timeZone, next) {
     const label = document.createElement('th');
     label.scope = 'row';
     label.textContent = dayLabel(day, { weekday: 'short', month: 'short', day: 'numeric' });
+    label.append(Object.assign(document.createElement('small'), { className: 'hijri-date', textContent: hijriDate(day) }));
     row.append(label);
     for (const event of events) {
       const cell = row.insertCell();
       cell.textContent = prayerTime(event.at, day, timeZone);
+      if (skipped.has(event.id)) {
+        cell.append(Object.assign(document.createElement('small'), { textContent: 'Skipped', className: 'skipped-label' }));
+      }
       if (event.id === next?.id) {
         cell.classList.add('next-cell');
         cell.setAttribute('aria-label', 'Next prayer: ' + names[event.prayer] + ', ' + cell.textContent);
@@ -234,7 +251,21 @@ function renderHistory(history, format) {
   historyKey = key;
   const expanded = new Set([...byId('playback-history').querySelectorAll('details[open]')].map(element => element.dataset.event));
   byId('empty-history').hidden = history.length > 0;
-  byId('playback-history').replaceChildren(...history.map(({ id, prayer, at, outcome, output, detail }) => {
+  const container = byId('playback-history');
+  container.replaceChildren();
+  const groups = new Map();
+  const dayFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: format.resolvedOptions().timeZone, dateStyle: 'short' });
+  for (const { id, prayer, at, outcome, output, detail } of history) {
+    const day = dayFormat.format(at);
+    if (!groups.has(day)) {
+      const heading = document.createElement('h3');
+      heading.textContent = dayLabel(day, { weekday: 'long', month: 'short', day: 'numeric' });
+      heading.append(Object.assign(document.createElement('small'), { className: 'hijri-date', textContent: hijriDate(day) }));
+      const list = document.createElement('ul');
+      list.className = 'history';
+      groups.set(day, list);
+      container.append(heading, list);
+    }
     const item = document.createElement('li');
     const title = document.createElement('strong');
     title.textContent = names[prayer] || 'Scheduled test';
@@ -250,7 +281,7 @@ function renderHistory(history, format) {
       disclosure.dataset.event = id;
       disclosure.open = expanded.has(id);
       const summary = document.createElement('summary');
-      summary.append(title, date, result);
+      summary.append(title, result, date);
       const note = document.createElement('p');
       note.textContent = detail || (outcome === 'missed' ? 'The scheduler could not start playback within one minute of the scheduled time.' : 'No further details were recorded.');
       disclosure.append(summary, note);
@@ -258,36 +289,61 @@ function renderHistory(history, format) {
     } else {
       const row = document.createElement('div');
       row.className = 'history-row';
-      row.append(title, date, result);
+      row.append(title, result, date);
       item.append(row);
     }
-    return item;
-  }));
+    groups.get(day).append(item);
+  }
+}
+
+function updateCountdown() {
+  const minutes = nextAthan ? Math.ceil((nextAthan.at - Date.now()) / 60_000) : 0;
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  byId('next-countdown').textContent = minutes > 0
+    ? 'In ' + [hours ? hours + ' hr' : '', remaining ? remaining + ' min' : ''].filter(Boolean).join(' ')
+    : '';
+}
+
+function syncDraftIndicator() {
+  if (!state || savedDraft === undefined) return;
+  byId('unsaved-changes').hidden = !state.configured || savedDraft === draft();
+}
+
+function draft() {
+  const { deviceLabel, fallbackLabel, ...settings } = input();
+  return JSON.stringify(settings);
 }
 
 async function refreshDashboard() {
   const request = ++refresh;
-  const { running, next, speaker, history, tests, days, timeZone } = await api('/status');
+  const { running, next, speaker, history, tests, days, skipped, timeZone } = await api('/status');
   if (request !== refresh || !days.length) return;
   const format = new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
   const clock = new Intl.DateTimeFormat(undefined, { timeZone, timeStyle: 'short' });
   const today = days[0][0].day;
   nextAthan = next;
+  updateCountdown();
+  const skippedIds = new Set(skipped);
   byId('skip-action').hidden = !next;
-  if (!next || prayerToSkip?.id !== next.id) byId('confirm-skip').hidden = true;
+  if (!next || prayerToSkip?.id !== next.id) byId('confirm-skip').open = false;
   byId('today-date').textContent = dayLabel(today, { weekday: 'long', month: 'long', day: 'numeric' });
+  byId('today-hijri').textContent = hijriDate(today);
   byId('today-zone').textContent = timeZone.replaceAll('_', ' ');
   byId('schedule-zone').textContent = timeZone.replaceAll('_', ' ');
   const scheduler = byId('scheduler-status');
   scheduler.textContent = running ? 'Scheduler running' : 'Scheduler offline';
   scheduler.classList.toggle('running', running);
+  byId('scheduler-help').hidden = running;
   byId('next-prayer').textContent = next ? names[next.prayer] : 'No upcoming prayer';
   const nextDate = next && new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short' }).format(next.at);
   byId('next-time').textContent = next ? clock.format(next.at) : '';
   byId('next-date').textContent = nextDate && nextDate !== today
-    ? dayLabel(nextDate, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+    ? dayLabel(nextDate, { weekday: 'long', month: 'short', day: 'numeric' }) + ' · ' + hijriDate(nextDate) : '';
   byId('skip-prayer').textContent = next ? names[next.prayer] + ' · ' + format.format(next.at) : '';
-  const availability = speaker?.available === false ? (speaker.reconnect ? ' · Connects at playback' : ' · Currently unavailable') : '';
+  let availability = '';
+  if (speaker?.bluetooth && speaker.available) availability = ' · Connected';
+  if (speaker?.available === false) availability = speaker.reconnect ? ' · Will connect at playback' : ' · Unavailable';
   byId('scheduled-speaker').textContent = speaker ? speaker.label + availability
     + (speaker.fallback ? ' · Fallback: ' + speaker.fallback : '') : 'Choose a speaker in settings';
   byId('pending-tests').hidden = tests.length === 0;
@@ -302,35 +358,49 @@ async function refreshDashboard() {
       row.classList.add('current-prayer');
       label.append(Object.assign(document.createElement('small'), { textContent: 'Next' }));
     }
+    if (event.at !== null && event.at <= Date.now()) row.classList.add('past-prayer');
+    if (skippedIds.has(event.id)) label.append(Object.assign(document.createElement('small'), { textContent: 'Skipped' }));
     const time = document.createElement('span');
     time.textContent = prayerTime(event.at, event.day, timeZone);
     row.append(label, time);
     return row;
   }));
-  const key = JSON.stringify([days, timeZone, next?.id]);
+  const key = JSON.stringify([days, timeZone, next?.id, skipped]);
   if (key !== scheduleKey) {
-    renderWeek(byId('schedule-times'), days, timeZone, next);
+    renderWeek(byId('schedule-times'), days, timeZone, next, skippedIds);
     scheduleKey = key;
   }
-  renderHistory(history, format);
+  renderHistory(history, clock);
 }
 
 async function refreshStop() {
   const check = ++stopCheck;
-  const { playing } = await api('/playback-active');
-  if (check === stopCheck) byId('stop-playback').hidden = !playing && !manualPlayback;
+  const playback = await api('/now-playing');
+  if (check !== stopCheck) return;
+  byId('playback-bar').hidden = !playback && !manualPlayback;
+  byId('stop-playback').hidden = !playback;
+  const indicator = byId('now-playing');
+  indicator.hidden = !playback && !manualPlayback;
+  const labels = { 'speaker-test': 'Speaker test', 'scheduled-test': 'Scheduled test', 'sleep-test': 'Sleep test', manual: 'Athan' };
+  const name = playback && (names[playback.prayer] || labels[playback.kind] || 'Athan');
+  indicator.textContent = name ? name + (playback.output ? ' · ' + playback.output.label : '') : 'Preparing playback…';
 }
 
 setInterval(() => {
   if (!document.hidden && state?.configured) void refreshDashboard().catch(() => {});
 }, 15_000);
 setInterval(() => {
-  if (!document.hidden && state) void refreshStop().catch(() => {});
+  if (!document.hidden && state) {
+    updateCountdown();
+    void refreshStop().catch(() => {});
+  }
 }, 2000);
 
 function audioInput() {
   return {
-    device: field('device').value, fallback: field('fallback').value,
+    device: field('device').value ?? 'auto',
+    fallback: field('fallback').value === 'none' ? '' : field('fallback').value ?? '',
+    defaultVolume: Number(field('defaultVolume').value),
     bluetoothAddress: field('bluetoothAddress').value, track: field('track-default').value,
   };
 }
@@ -352,6 +422,8 @@ function action(id, run) {
 async function initialize() {
   state = await api('/state');
   const settings = state.settings;
+  field('defaultVolume').value = settings.defaultVolume;
+  updateVolumeLabel();
   for (const key of ['latitude', 'longitude', 'timeZone', 'asr', 'bluetoothAddress']) field(key).value = settings[key];
   field('wake').checked = settings.wake;
   field('enable').checked = (!state.configured || state.enabled) && !state.startupError;
@@ -379,13 +451,17 @@ async function initialize() {
   for (const prayer of state.prayers) {
     const offset = dynamicField(byId('offsets'), names[prayer] + ' offset in minutes', 'offset-' + prayer, document.createElement('input'));
     Object.assign(offset, { type: 'number', min: -120, max: 120, step: 1, value: settings.offsets[prayer] ?? 0 });
-    const volume = dynamicField(byId('volumes'), names[prayer] + ' volume (%)', 'volume-' + prayer, document.createElement('input'));
+    const row = document.createElement('div');
+    row.className = 'prayer-audio-row';
+    const title = document.createElement('strong');
+    title.textContent = names[prayer];
+    row.append(title);
+    dynamicField(row, names[prayer] + ' recording', 'track-' + prayer, document.createElement('select'));
+    const volume = dynamicField(row, names[prayer] + ' volume (%)', 'volume-' + prayer, document.createElement('input'));
     Object.assign(volume, { type: 'number', min: 0, max: 100, step: 1, value: settings.volumes[prayer] ?? '', placeholder: '50' });
+    byId('prayer-audio').append(row);
   }
-  for (const track of ['default', ...state.prayers]) {
-    const select = dynamicField(byId(track === 'default' ? 'default-track' : 'tracks'), names[track] || 'Default Athan', 'track-' + track, document.createElement('select'));
-    select.required = track === 'default';
-  }
+  dynamicField(byId('default-track'), 'Default Athan', 'track-default', document.createElement('select')).required = true;
   if (state.desktop && !settings.asr) field('asr').value = 'standard';
   library(state.library, settings.audio);
   const outputId = id => state.desktop ? id.replace(/^avfoundation\//, 'coreaudio/') : id;
@@ -395,17 +471,23 @@ async function initialize() {
   form.querySelector('[type=submit]').textContent = state.configured ? 'Save changes' : 'Finish setup';
   byId('navigation').hidden = !state.configured;
   byId('scheduled-test').hidden = !state.configured;
+  savedDraft = draft();
   showPage(0);
   navigate(state.configured ? 'today' : 'settings');
   void refreshStop().catch(() => {});
   const outputError = state.desktop ? 'Could not list audio outputs. Try refreshing speakers.' : 'Speaker list unavailable. Install mpv and refresh speakers.';
   const error = state.startupError || (Array.isArray(state.devices) ? '' : outputError);
   status(error, Boolean(error));
+  syncDraftIndicator();
 }
 
 for (const button of byId('navigation').querySelectorAll('button')) {
   button.addEventListener('click', () => navigate(button.dataset.view, true));
 }
+byId('startup-settings').addEventListener('click', () => {
+  showPage(2);
+  navigate('settings', true);
+});
 action('scheduled-test', async () => {
   await api('/scheduled-test');
   await refreshDashboard();
@@ -415,22 +497,24 @@ byId('skip-next').addEventListener('click', () => {
   prayerToSkip = nextAthan;
   if (!prayerToSkip) return;
   byId('confirm-skip-button').textContent = 'Skip ' + names[prayerToSkip.prayer] + ' once';
-  byId('confirm-skip').hidden = false;
-  byId('confirm-skip-button').focus();
-});
-byId('cancel-skip').addEventListener('click', () => {
-  byId('confirm-skip').hidden = true;
-  byId('skip-next').focus();
+  byId('skip-description').textContent = byId('skip-prayer').textContent + ' will be skipped once.';
+  byId('skip-error').textContent = '';
+  byId('confirm-skip').open = true;
 });
 action('confirm-skip-button', async () => {
   const prayer = prayerToSkip;
-  byId('confirm-skip').hidden = true;
-  await api('/skip-next', { id: prayer.id });
+  try {
+    await api('/skip-next', { id: prayer.id });
+  } catch (error) {
+    byId('skip-error').textContent = error.message;
+    return;
+  }
+  byId('confirm-skip').open = false;
   await refreshDashboard();
   status('Skipped the upcoming ' + names[prayer.prayer] + ' Athan.');
 });
 action('devices', async () => {
-  devices(await api('/devices'), field('device').value, field('fallback').value, speakerLabels());
+  devices(await api('/devices'), audioInput().device, audioInput().fallback, speakerLabels());
   if (state.desktop) await loadPaired();
   status('Speaker list refreshed.');
 });
@@ -444,6 +528,9 @@ action('preview', async () => {
     const time = document.createElement('dd');
     label.textContent = names[prayer];
     time.textContent = at === null ? 'Unavailable' : format.format(at);
+    if (at !== null) time.append(Object.assign(document.createElement('small'), {
+      className: 'hijri-date', textContent: hijriDate(new Intl.DateTimeFormat('sv-SE', { timeZone: settings.timeZone, dateStyle: 'short' }).format(at)),
+    }));
     return [label, time];
   }));
   list.hidden = false;
@@ -461,6 +548,7 @@ action('alafasy', async () => {
   status('Downloading the Alafasy recording…');
   const result = await api('/alafasy');
   library(result.library, { default: result.id });
+  syncDraftIndicator();
   status('Alafasy is selected as the default. Save setup to apply it.');
 });
 action('import', async () => {
@@ -473,25 +561,34 @@ action('import', async () => {
     const result = await api('/upload?name=' + encodeURIComponent(file.name), file);
     const selected = field('track-default').value;
     library(result.library, selected === state.recommended.id ? { default: result.id } : {});
+    syncDraftIndicator();
     status('Recording imported. Choose which prayers should use it.');
   } finally {
     element.value = '';
   }
 });
-async function previewPlayback(full) {
+async function previewPlayback(full, saved = false) {
   if (manualPlayback) return;
   manualPlayback = true;
-  byId('stop-playback').hidden = false;
-  status(full ? 'Starting playback…' : 'Testing the selected speaker…');
+  void refreshStop().catch(() => {});
+  const feedback = saved ? (message, error = false) => {
+    const element = byId('speaker-feedback');
+    element.textContent = message;
+    element.classList.toggle('error', error);
+  } : status;
+  feedback(full ? 'Starting playback…' : 'Testing the selected speaker…');
   try {
-    const { stopped, output } = await api('/play', { ...audioInput(), full });
-    status(stopped ? 'Athan stopped.' : 'Played on ' + output.label + (output.fallback ? ' (fallback).' : '.'));
+    const { stopped, output } = await (saved ? api('/test-speaker') : api('/play', { ...audioInput(), full }));
+    feedback(stopped ? 'Athan stopped.' : 'Played on ' + output.label + (output.fallback ? ' (fallback).' : '.'));
+  } catch (error) {
+    feedback(error.message, true);
   } finally {
     manualPlayback = false;
     void refreshStop().catch(() => {});
   }
 }
 
+action('test-speaker', () => previewPlayback(false, true));
 action('play', () => previewPlayback(false));
 action('play-now', () => previewPlayback(true));
 action('stop-playback', async () => {
@@ -506,6 +603,12 @@ action('sleep-status', async () => {
   const result = await api('/sleep-status');
   status(result.result || (result.running ? 'Sleep test pending.' : 'No sleep test scheduled.'));
 });
+function updateVolumeLabel() {
+  byId('default-volume-value').textContent = field('defaultVolume').value + '%';
+}
+field('defaultVolume').addEventListener('input', updateVolumeLabel);
+form.addEventListener('input', syncDraftIndicator);
+form.addEventListener('change', syncDraftIndicator);
 form.addEventListener('submit', async event => {
   event.preventDefault();
   if (!validateForm()) return;
@@ -513,10 +616,18 @@ form.addEventListener('submit', async event => {
   button.disabled = true;
   try {
     status('Saving setup…');
-    const result = await api('/save', input());
-    library(result.library, result.settings.audio);
+    const values = input();
+    const submitted = draft();
+    const result = await api('/save', values);
+    if (draft() === submitted) {
+      library(result.library, result.settings.audio);
+      savedDraft = draft();
+    } else {
+      savedDraft = submitted;
+    }
     const onboarding = !state.configured;
     state.configured = true;
+    syncDraftIndicator();
     byId('navigation').hidden = false;
     byId('scheduled-test').hidden = false;
     byId('settings-title').textContent = 'Settings';
@@ -536,7 +647,7 @@ for (const button of byId('steps').querySelectorAll('button')) {
 }
 byId('back').addEventListener('click', () => visit(page - 1));
 byId('next').addEventListener('click', () => visit(page + 1));
-byId('paired').addEventListener('change', () => { field('bluetoothAddress').value = byId('paired').value; });
+byId('paired').addEventListener('change', () => { field('bluetoothAddress').value = byId('paired').value === 'none' ? '' : byId('paired').value ?? ''; syncDraftIndicator(); });
 byId('bluetooth-settings').addEventListener('click', () => desktop('bluetooth'));
 byId('find-city').addEventListener('click', () => {
   byId('find-city').disabled = true;

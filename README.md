@@ -21,8 +21,8 @@ For other Linux distributions, see [Run from source](#run-from-source). For a Pi
 ## Set up playback
 
 1. **Confirm prayer times.** Set your location, time zone, calculation method, and Asr convention. Use **Preview today** or **Preview 7 days** to check times and offsets against your local timetable.
-2. **Choose recordings.** Use the bundled library, import your own audio, or download the recommended Alafasy recording. Set a different recording or volume for each prayer. The default volume is 50%.
-3. **Choose a speaker.** Pair Bluetooth speakers in your system settings, then refresh the speaker list. Select an output and, optionally, a fallback. Use **Test playback** to check it and **Stop Athan** to end playback early. The Mac app also has **Play Athan now** for the full recording.
+2. **Choose recordings and volume.** Use the bundled library, import your own audio, or download the recommended Alafasy recording. The **Default volume** slider starts at 50%. Each prayer can override the recording and volume under **Settings → Audio**.
+3. **Choose a speaker.** Pair Bluetooth speakers in your system settings, then refresh the speaker list. Select a preferred output and an optional fallback. Use **Test playback** to check the current selection. The Mac app also has **Play Athan now** for the full recording.
 4. **Save the schedule.** Select **Enable automatic startup** to run in the background now and at future sign-ins on macOS, Windows, or Linux with systemd. Keep the computer awake and signed in. The display can turn off.
 
 | Platform | Bluetooth playback |
@@ -33,9 +33,19 @@ For other Linux distributions, see [Run from source](#run-from-source). For a Pi
 
 ## Check the schedule
 
-Open **Today** to see the next prayer, saved speaker, scheduler status, and today’s times. **Schedule** has a seven-day timetable and **Skip next Athan**. **History** shows the results of recent prayers and tests. To test background playback with your saved settings, go to **Settings → Audio → Test in 3 minutes**.
+| View | What you can do |
+| --- | --- |
+| **Today** | See the next prayer and countdown, today’s prayer times, and scheduler status. Use **Test speaker** to check your saved output or **Open Startup settings** if the scheduler is offline. |
+| **Schedule** | View seven days of prayer times. Use **Skip next Athan** for a one-time skip. |
+| **History** | Review recent prayers and tests by date, including the speaker used and details for missed or failed playback. |
 
-For terminal diagnostics, use the commands below.
+Today, Schedule, and History show Gregorian and Hijri dates together. Hijri dates use Umm al-Qura in the configured prayer time zone and may differ from local moon sightings.
+
+To check background playback with your saved settings, use **Settings → Audio → Test in 3 minutes**. Use **Stop Athan** during playback.
+
+## Appendix
+
+### Scheduler diagnostics
 
 | Platform | Check the scheduler | Recent playback |
 | --- | --- | --- |
@@ -44,8 +54,6 @@ For terminal diagnostics, use the commands below.
 | Linux with systemd | `systemctl --user status athanbot.service` | `journalctl --user -u athanbot.service -n 30` |
 
 If the scheduler is missing, open setup and save again with **Enable automatic startup** selected.
-
-## Appendix
 
 ### MacBook sleep
 
@@ -84,4 +92,4 @@ Run `npm test` from the project folder. Installers are written to `dist/`.
 
 Version tags such as `v0.3.2` trigger the release workflow. GitHub publishes installers and checksums after the build and smoke checks pass.
 
-Prayer calculations use [Adhan JS](vendor/adhan/README.md). See [recording credits and licenses](audio/README.md).
+Prayer calculations use [Adhan JS](vendor/adhan/README.md). The app bundles [Web Awesome components and licenses](src/setup/vendor/web-awesome/LICENSES.txt) for offline use. See [recording credits and licenses](audio/README.md).

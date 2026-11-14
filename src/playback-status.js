@@ -49,6 +49,19 @@ export async function nextPrayer(settings, now) {
   return scheduledPrayers(settings, now, 8).find(event => event.at > now && !claimed.has(event.id)) ?? null;
 }
 
+export async function skippedPrayers(days) {
+  const claimed = new Set(await entries(eventDirectory));
+  const ids = days.flat().map(event => event.id).filter(id => claimed.has(id));
+  const skips = await Promise.all(ids.map(async id => {
+    const status = await readFile(join(eventDirectory, id), 'utf8').catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return '';
+    });
+    return status.trim() === 'skipped' ? id : null;
+  }));
+  return skips.filter(Boolean);
+}
+
 export async function schedulePlaybackTest(now = Date.now()) {
   const at = now + 180_000;
   const event = { id: 'test-' + at + '-' + randomUUID(), at };

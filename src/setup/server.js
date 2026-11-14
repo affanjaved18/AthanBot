@@ -1,14 +1,14 @@
 import { access, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { audioExtensions, defaults, highLatitudeRules, methods, outputSettings, polarRules, prayers, readSettings, saveSettings, validate } from '../settings.js';
-import { importTrack, listTracks, maxAudioBytes, normalizeOutput, outputs, pairedBluetooth, play, playbackActive, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
+import { audioExtensions, defaults, highLatitudeRules, methods, outputSettings, playbackVolume, polarRules, prayers, readSettings, saveSettings, validate } from '../settings.js';
+import { currentPlayback, importTrack, listTracks, maxAudioBytes, normalizeOutput, outputs, pairedBluetooth, play, playbackActive, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
 import { upcomingDays } from '../prayers.js';
 import { startup, startupEnabled } from '../startup.js';
 import { scheduleSleepTest } from '../sleep.js';
 import { syncWake } from '../wake.js';
 import { claimEvent } from '../scheduler.js';
-import { eventDirectory, nextPrayer, playbackHistory, recordPlayback, scheduledTests, schedulePlaybackTest, schedulerRunning } from '../playback-status.js';
+import { eventDirectory, nextPrayer, playbackHistory, recordPlayback, scheduledTests, schedulePlaybackTest, schedulerRunning, skippedPrayers } from '../playback-status.js';
 
 const alafasy = {
   id: 'download-alafasy',
@@ -19,7 +19,10 @@ const alafasy = {
 const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/calendar.js': ['calendar.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/vendor/web-awesome/components.js': ['vendor/web-awesome/components.js', 'text/javascript; charset=utf-8'],
+  '/vendor/web-awesome/theme.css': ['vendor/web-awesome/theme.css', 'text/css; charset=utf-8'],
   '/athanbot.png': ['athanbot.png', 'image/png'],
   '/fonts/Inter.woff2': ['fonts/Inter.woff2', 'font/woff2'],
 };
@@ -72,7 +75,8 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
     response.once('close', () => { requests--; resetIdleTimer(); });
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+    // Web Awesome keeps its built-in icons in the local bundle as data URLs.
+    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' data:; frame-ancestors 'none'; base-uri 'none'");
     try {
       const host = '127.0.0.1:' + server.address().port;
       if (request.headers.host !== host || (request.headers.origin && request.headers.origin !== 'http://' + host)) {
@@ -110,23 +114,26 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
       }
       if (url.pathname === '/devices') return send(response, await outputs());
       if (url.pathname === '/playback-active') return send(response, { playing: await playbackActive() });
+      if (url.pathname === '/now-playing') return send(response, await currentPlayback());
       if (url.pathname === '/status') {
         const saved = await readSettings();
         const now = Date.now();
         const checkIn = schedulerRunning(now);
-        const [running, next, history, devices, paired, tests] = await Promise.all([
+        const days = saved ? upcomingDays(saved, now, 7) : [];
+        const [running, next, history, devices, paired, tests, skipped] = await Promise.all([
           checkIn, saved ? nextPrayer(saved, now) : null, playbackHistory(now, checkIn),
           saved ? outputs().catch(() => null) : null, saved?.bluetoothAddress ? pairedBluetooth().catch(() => []) : [],
-          scheduledTests(),
+          scheduledTests(), skippedPrayers(days),
         ]);
         const preferred = saved && devices?.find(device => device.id === normalizeOutput(saved.device));
         const bluetooth = paired.find(speaker => speaker.address === saved?.bluetoothAddress);
         return send(response, {
-          running, next, history, days: saved ? upcomingDays(saved, now, 7) : [],
+          running, next, history, days, skipped,
           tests: tests.filter(test => !history.some(record => record.id === test.id)), timeZone: saved?.timeZone,
           speaker: saved && {
             label: preferred?.label || bluetooth?.name || saved.deviceLabel || (saved.device === 'auto' ? 'System default' : saved.device),
             available: devices ? Boolean(preferred) : null,
+            bluetooth: Boolean(saved.bluetoothAddress) || /bluez|^coreaudio\/[0-9a-f]{2}(?:-[0-9a-f]{2}){5}:/i.test(saved.device),
             reconnect: Boolean(saved.bluetoothAddress) && (!desktop || Boolean(bluetooth)),
             fallback: saved.fallback && (devices?.find(device => device.id === normalizeOutput(saved.fallback))?.label || saved.fallbackLabel || saved.fallback),
           },
@@ -154,7 +161,7 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
       }
       const input = JSON.parse((await body(request, 64 * 1024)).toString('utf8') || '{}');
       if (url.pathname === '/preview') {
-        const settings = validate({ ...input, audio: {}, volumes: {}, device: 'auto', fallback: '', bluetoothAddress: '' });
+        const settings = validate({ ...input, audio: {}, volumes: {}, defaultVolume: undefined, device: 'auto', fallback: '', bluetoothAddress: '' });
         const days = upcomingDays(settings, Date.now(), input.days === 7 ? 7 : 1);
         return send(response, input.days === 7 ? days : days[0]);
       }
@@ -168,16 +175,22 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
         await recordPlayback(next, { outcome: 'skipped', updatedAt: now });
         return send(response, next);
       }
-      if (url.pathname === '/play') {
+      if (url.pathname === '/play' || url.pathname === '/test-speaker') {
         if (testingAudio) throw new Error('Test playback is already running.');
         testingAudio = true;
         try {
-          const settings = outputSettings(input);
-          const file = trackPath(await resolveTrack(input.track));
+          const savedTest = url.pathname === '/test-speaker';
+          const saved = savedTest ? await readSettings() : null;
+          if (savedTest && !saved?.audio.default) throw new Error('Save a recording and speaker before testing.');
+          const settings = saved || outputSettings(input);
+          const file = trackPath(await resolveTrack(saved ? saved.audio.default : input.track));
+          const full = !savedTest && input.full === true;
           let output;
           const finished = await withPlaybackOutput(settings, undefined, async (device, selected) => {
             output = selected;
-            return play(file, device, desktop && input.full !== true);
+            return play(file, device, savedTest || (desktop && !full), saved?.defaultVolume ?? playbackVolume(input.defaultVolume), {
+              kind: full ? 'manual' : 'speaker-test', output: selected,
+            });
           });
           return send(response, { ok: true, stopped: finished === false, output });
         } finally {
@@ -190,7 +203,7 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
         sleepTest = { running: true };
         try {
           const track = await resolveTrack(input.track);
-          const settings = { ...outputSettings(input), fallback: '', audio: { default: track } };
+          const settings = { ...outputSettings(input), fallback: '', audio: { default: track }, defaultVolume: playbackVolume(input.defaultVolume) };
           await access(trackPath(track));
           const test = await scheduleSleepTest(settings, Number(input.seconds));
           sleepTest.at = test.at;

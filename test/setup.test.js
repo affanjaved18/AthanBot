@@ -74,6 +74,7 @@ esac
   assert.equal((await call('/skip-next', { id: initialStatus.next.id })).status, 200);
   const skipped = await (await call('/status')).json();
   assert.notEqual(skipped.next.id, initialStatus.next.id);
+  assert.ok(skipped.skipped.includes(initialStatus.next.id));
   assert.equal(skipped.history[0].outcome, 'skipped');
   assert.equal((await call('/scheduled-test')).status, 400);
   const { markSchedulerRunning, schedulePlaybackTest } = await import('../src/playback-status.js');
@@ -107,7 +108,7 @@ esac
     return Promise.resolve(new Response(new Uint8Array([4, 5, 6])));
   };
   t.after(() => { globalThis.fetch = fetchLocal; });
-  const recommended = { ...input, audio: { default: state.recommended.id } };
+  const recommended = { ...input, defaultVolume: 35, audio: { default: state.recommended.id } };
   assert.equal((await call('/preview', recommended)).status, 200);
   assert.equal(downloads, 0);
   const savedDefault = await (await call('/save', recommended)).json();
@@ -125,12 +126,18 @@ esac
   assert.equal(desktopSettings.desktop, true);
   assert.equal(desktopSettings.configured, true);
   assert.equal(desktopSettings.settings.audio.default, savedDefault.settings.audio.default);
+  assert.equal(desktopSettings.settings.defaultVolume, 35);
 
   const play = full => fetch(new URL('/play', desktopAddress), {
     method: 'POST', headers: { 'X-AthanBot-Token': desktopAddress.hash.slice(1) },
     body: JSON.stringify({ device: input.device, track: id, full }),
   });
   const playbackArgs = join(directory, 'playback-args');
+  const speakerTest = await (await call('/test-speaker', { device: 'auto', track: id })).json();
+  assert.equal(speakerTest.output.label, 'Test speaker');
+  assert.match(await readFile(playbackArgs, 'utf8'), /--volume=35/);
+  assert.match(await readFile(playbackArgs, 'utf8'), /--length=8/);
+  assert.ok((await readFile(playbackArgs, 'utf8')).includes(savedDefault.settings.audio.default));
   assert.equal((await play(false)).status, 200);
   assert.match(await readFile(playbackArgs, 'utf8'), /--length=8/);
   assert.equal((await play(true)).status, 200);
@@ -155,6 +162,9 @@ esac
   const playing = play(true);
   await waitForPlayer();
   assert.deepEqual(await (await call('/playback-active')).json(), { playing: true });
+  assert.deepEqual(await (await call('/now-playing')).json(), {
+    kind: 'manual', output: { id: 'pipewire/test', label: 'Test speaker', fallback: false },
+  });
   assert.equal((await call('/stop-playback', null, false)).status, 403);
   assert.deepEqual(await (await call('/stop-playback')).json(), { stopped: true });
   assert.deepEqual(await (await playing).json(), {
