@@ -1,120 +1,81 @@
 # AthanBot
 
-Play the Athan automatically at local prayer times on macOS, Windows, or Linux.
-AthanBot calculates all five daily prayer times offline and plays a recording
-through your selected speaker.
+Play the Athan automatically through your chosen speaker on macOS, Windows, or Linux. AthanBot calculates all five daily prayer times offline.
 
-[macOS](#macos) · [Windows](#windows) · [Linux](#linux) · [Raspberry Pi](#headless-raspberry-pi) · [Troubleshooting](#troubleshooting)
+[Install](#install) · [Set up playback](#set-up-playback) · [Check the schedule](#check-the-schedule) · [Appendix](#appendix)
 
-## Set up AthanBot
+## Install
 
-### macOS
+Build the installer for your platform using the [appendix](#build-and-test), or use a copy you already have.
 
-1. Open the disk image for your Mac and drag **AthanBot** into **Applications**.
-   The app supports macOS 13.5 or later and includes its own audio player.
-2. Open AthanBot and follow **Location → Audio → Schedule**.
-3. Save with **Enable automatic startup** selected. You can close the app
-   window after saving.
+| Platform | Install | Open |
+| --- | --- | --- |
+| macOS 13.5+ | Open the `.dmg` for your Mac and drag **AthanBot** into **Applications**. | Open **AthanBot** from Applications. |
+| Windows x64 or ARM64 | Run the matching `.exe`. Install [mpv](https://mpv.io/installation/) and add the folder containing `mpv.exe` to your user `Path`. | Open **AthanBot** from Start. Setup opens in your browser. |
+| Debian or Ubuntu, amd64 or arm64 | Install the matching `.deb`, for example `sudo apt install ./athanbot_0.2.0_amd64.deb`. APT also installs mpv. | Open **AthanBot** from the app menu. Setup opens in your browser. |
 
-### Windows
+For other Linux distributions, see [Run from source](#run-from-source). For a Pi without a display, see [Headless Raspberry Pi](#headless-raspberry-pi).
 
-1. Install [Node.js 22+](https://nodejs.org/en/download) and
-   [mpv](https://mpv.io/installation/). Add the folder containing `mpv.exe` to
-   your user `Path`, then open a new PowerShell window.
-2. From the AthanBot folder, run `npm.cmd run setup` and open the local URL it
-   prints.
-3. Save with **Enable automatic startup** selected. Task Scheduler starts
-   AthanBot in your Windows session now and at future sign-ins.
+## Set up playback
 
-### Linux
+1. **Confirm prayer times.** Set your location, time zone, calculation method, and Asr convention. Compare **Preview today** with your local timetable and adjust offsets if needed.
+2. **Choose recordings.** Use the bundled library, import your own audio, or download the recommended Alafasy recording in the app. You can assign a different recording to Fajr or any other prayer.
+3. **Choose a speaker.** Pair Bluetooth speakers in your system settings, then refresh the speaker list. Select an output and, optionally, a fallback. Use **Test playback** to check it and **Stop Athan** to end playback early. The Mac app also has **Play Athan now** for the full recording.
+4. **Save the schedule.** Select **Enable automatic startup** to run in the background now and at future sign-ins on macOS, Windows, or Linux with systemd. Keep the computer awake and signed in. The display can turn off.
 
-1. Install Node.js 22+ and mpv. Install BlueZ if you want Bluetooth
-   reconnection.
-2. From the AthanBot folder, run `npm run setup` and open the local URL it
-   prints.
-3. On systemd systems, save with **Enable automatic startup** selected to
-   start the user service. On other systems, clear the checkbox, save, and
-   run `node src/main.js run` in your session.
+| Platform | Bluetooth playback |
+| --- | --- |
+| macOS app | Select the paired speaker in the Bluetooth picker. AthanBot connects for playback and disconnects afterward. |
+| Windows | Connect and manage the speaker in Windows Bluetooth settings. |
+| Linux | Install BlueZ and enter the paired speaker’s Bluetooth address for automatic reconnection. |
 
-For browser setup on macOS, install Node.js 22+ and mpv and run
-`npm run setup`. Install `blueutil` for Bluetooth reconnection by address.
-Keep the project folder in place while automatic startup is enabled.
+## Check the schedule
+
+Open **Preview today** to see prayer times. Use the commands below to check whether the scheduler is running and where to see recent playback.
+
+| Platform | Check the scheduler | Recent playback |
+| --- | --- | --- |
+| macOS | `launchctl print "gui/$(id -u)/org.athanbot.service"` | `~/Library/Application Support/AthanBot/athanbot.log` |
+| Windows PowerShell | `Get-ScheduledTask -TaskName "AthanBot-*"` | `%LOCALAPPDATA%\AthanBot\athanbot.log` |
+| Linux with systemd | `systemctl --user status athanbot.service` | `journalctl --user -u athanbot.service -n 30` |
+
+If the scheduler is missing, open setup and save again with **Enable automatic startup** selected.
+
+## Appendix
+
+### MacBook sleep
+
+- **Keep the Mac awake with the display off.** With the lid open and power connected, enable **System Settings → Battery → Options → Prevent automatic sleeping on power adapter when the display is off**.
+- **Try scheduled wake.** In the Mac app, choose **Schedule → Enable sleep playback**, approve the helper, then run **Test sleep playback** with your usual speaker, power source, and lid position. Turn on **Schedule Mac wake alarms** only after hearing the full Athan in the test. Scheduled wake is experimental, and macOS can wake into DarkWake with Bluetooth audio unavailable.
+- **List registered wake alarms.** Run `pmset -g sched` and look for `org.athanbot.schedule`.
+
+### Run from source
+
+- Install Node.js 22+ and mpv. From the project folder, run `npm run setup` (`npm.cmd run setup` in Windows PowerShell) and open the printed URL. Keep the folder in place while automatic startup is enabled. macOS source installations use `blueutil` for Bluetooth reconnection.
+- On Linux without systemd, save with **Enable automatic startup** cleared and run `node src/main.js run` in your session. With the `.deb` installed, use `athanbot run`.
+- Run `node src/main.js times 2` for two days of prayer times, `node src/main.js outputs` to list speakers, or `node src/main.js disable` to turn off automatic startup.
+
+To uninstall the `.deb`, run `athanbot disable` if you enabled automatic startup, then `sudo apt remove athanbot`.
 
 ### Headless Raspberry Pi
 
-Use Raspberry Pi OS with Node.js 22+ and WirePlumber 0.5 for headless Bluetooth.
-Run `./scripts/prepare-pi.sh --headless` as your regular user, then reboot.
-Connect a wired speaker or pair and trust your Bluetooth speaker using
-`bluetoothctl` under the same account.
-
-Run `node src/main.js setup 8787` on the Pi. From your computer, run the command
-below with your Pi's username and hostname, then open the full URL printed
-by AthanBot, including its fragment. Save with **Enable automatic startup**
-selected.
+1. Use Raspberry Pi OS with Node.js 22+. For headless Bluetooth use WirePlumber 0.5.
+2. As your regular user, run `./scripts/prepare-pi.sh --headless` and reboot. Connect a wired speaker or pair and trust your Bluetooth speaker with `bluetoothctl` under the same account.
+3. On the Pi, run `node src/main.js setup 8787`. From your computer, run the command below with your Pi’s username and hostname.
+4. On your computer, open the full URL printed by AthanBot, including the part beginning with `#`. Save with **Enable automatic startup** selected.
 
 ```sh
 ssh -N -L 8787:127.0.0.1:8787 user@raspberrypi.local
 ```
 
-## Configure playback
+### Build and test
 
-- **Prayer times.** Set your location, time zone, calculation method, and Asr
-  convention. Compare **Preview today** with your preferred prayer timetable
-  and adjust offsets if needed.
-- **Recordings.** Use the bundled library, import your own files, or download
-  the recommended Alafasy recording. You can choose a separate recording for
-  Fajr or any other prayer.
-- **Speakers.** Pair Bluetooth speakers in system settings, refresh the list,
-  and choose a preferred output. On the Mac app, also select the paired
-  Bluetooth speaker so AthanBot connects for playback and disconnects
-  afterward. On Linux, enter its address for automatic reconnection.
-  Windows manages the Bluetooth connection. Scheduled playback can use an
-  optional fallback output.
-- **Controls.** Use **Test playback** to check your speaker. On the Mac app,
-  **Play Athan now** plays the full default recording. **Stop Athan** ends
-  current playback and leaves future prayers scheduled.
+Run `npm test` from the project folder. Installers are written to `dist/`.
 
-Keep the computer awake and signed in for desktop playback. On a plugged-in
-MacBook, leave the lid open and enable **System Settings → Battery → Options →
-Prevent automatic sleeping on power adapter when the display is off**. The
-screen can turn off while AthanBot runs.
+| Installer | Build command | Requirements and options |
+| --- | --- | --- |
+| macOS `.dmg` | `./scripts/build_macos_app.sh` | Apple Command Line Tools and FFmpeg. Set `ATHANBOT_MAC_ARCH=x86_64` for Intel. Use `ATHANBOT_SIGN_IDENTITY` and `ATHANBOT_NOTARY_PROFILE` to sign and notarize. |
+| Windows `.exe` | `./scripts/build_desktop_package.sh windows x64` | NSIS 3. Use `arm64` for Windows on ARM. Bundles Node.js. |
+| Linux `.deb` | `./scripts/build_desktop_package.sh linux x64` | `dpkg-deb` or BSD tar. Use `arm64` for ARM. Bundles Node.js. |
 
-### Scheduled wake on macOS
-
-Scheduled wake is experimental. In the Mac app, choose **Schedule → Enable
-sleep playback**, approve the helper install, then run **Test sleep playback**.
-Test with the same speaker, power source, and lid position you plan to use.
-Enable **Schedule Mac wake alarms** only after you hear the full Athan during
-a test. macOS can wake into DarkWake while Bluetooth audio is unavailable,
-even when plugged in with the lid closed.
-
-## Troubleshooting
-
-| Platform | Check the background scheduler |
-| --- | --- |
-| macOS | `launchctl print "gui/$(id -u)/org.athanbot.service"` |
-| Windows PowerShell | `Get-ScheduledTask -TaskName "AthanBot-*"` |
-| Linux with systemd | `systemctl --user status athanbot.service` |
-
-Look for a running task or service. If it is missing, save again with
-**Enable automatic startup** selected. Check recent playback in
-`~/Library/Application Support/AthanBot/athanbot.log` on macOS,
-`%LOCALAPPDATA%\AthanBot\athanbot.log` on Windows, or with
-`journalctl --user -u athanbot.service -n 30` on Linux. On macOS,
-`pmset -g sched` lists registered wake alarms under `org.athanbot.schedule`.
-
-From the project folder, `node src/main.js times 2` lists today’s and tomorrow’s
-prayer times from saved settings. Use `node src/main.js outputs` to list speakers,
-or `node src/main.js disable` to turn off automatic startup. With a bundled Mac
-app, use **Preview today** in the app to check the current configuration.
-
-## Build and test
-
-Run `npm test` from the project folder. To build the Mac disk image, install
-Apple Command Line Tools and FFmpeg, then run `./scripts/build_macos_app.sh`.
-The output appears in `dist/`. Set `ATHANBOT_MAC_ARCH=x86_64` for an Intel
-build. For distribution, set `ATHANBOT_SIGN_IDENTITY` and
-`ATHANBOT_NOTARY_PROFILE` to sign and notarize the image.
-
-Prayer calculations use [Adhan JS](vendor/adhan/README.md).
-See [recording credits and licenses](audio/README.md).
+Prayer calculations use [Adhan JS](vendor/adhan/README.md). See [recording credits and licenses](audio/README.md).

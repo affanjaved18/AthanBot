@@ -5,6 +5,8 @@ import { outputs, play, trackPath, withPlaybackOutput } from './audio.js';
 import { runScheduler } from './scheduler.js';
 import { scheduleSleepTest } from './sleep.js';
 import { startup } from './startup.js';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 
 async function configured() {
   const settings = await readSettings();
@@ -17,6 +19,16 @@ async function main([command, arg, extra]) {
     case 'app-setup':
       await setup(0, { desktop: true });
       break;
+    case 'desktop': {
+      const { server, url } = await setup(0, { idleTimeout: 30 * 60 * 1000 });
+      const windows = process.platform === 'win32';
+      const command = windows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'rundll32.exe') : 'xdg-open';
+      const args = windows ? ['url.dll,FileProtocolHandler', url] : [url];
+      const browser = spawn(command, args, { stdio: 'ignore', windowsHide: true });
+      browser.on('error', error => { console.error(error.message); server.close(); });
+      browser.on('exit', code => { if (code) server.close(); });
+      break;
+    }
     case 'setup': {
       const port = arg === undefined ? 0 : Number(arg);
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid setup port.');

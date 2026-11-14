@@ -36,12 +36,18 @@ function send(response, payload, status = 200) {
   response.end(JSON.stringify(payload));
 }
 
-export async function setup(port = 0, { desktop = false } = {}) {
+export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
   const token = randomBytes(32).toString('hex');
   let sleepTest;
   let testingAudio = false;
   let saving = false;
   let downloading;
+  let idleTimer;
+  let requests = 0;
+  function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    if (idleTimeout && !requests) idleTimer = setTimeout(() => server.close(), idleTimeout);
+  }
   async function getAlafasy() {
     downloading ??= (async () => {
       const audio = await fetch(alafasy.url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
@@ -56,6 +62,9 @@ export async function setup(port = 0, { desktop = false } = {}) {
   const resolveTrack = id => id === alafasy.id ? getAlafasy() : id;
   const startupState = () => startupEnabled().catch(error => ({ error: error.stderr?.trim() || error.message }));
   const server = createServer(async (request, response) => {
+    requests++;
+    resetIdleTimer();
+    response.once('close', () => { requests--; resetIdleTimer(); });
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
@@ -171,6 +180,8 @@ export async function setup(port = 0, { desktop = false } = {}) {
     server.listen(port, '127.0.0.1', resolve);
   });
   const url = `http://127.0.0.1:${server.address().port}/#${token}`;
+  server.once('close', () => clearTimeout(idleTimer));
+  resetIdleTimer();
   if (desktop) console.log(url);
   else console.log('Open this address in your browser. Press Ctrl+C when setup is finished.\n' + url);
   return { server, url };

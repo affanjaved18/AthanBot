@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=AthanBot
+Comment=Play the Athan at local prayer times
+Exec=athanbot
+Terminal=false
+Categories=AudioVideo;Audio;

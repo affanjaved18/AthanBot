@@ -1,0 +1,6 @@
+#!/bin/sh
+app=/usr/lib/athanbot
+if [ "$#" -eq 0 ]; then
+  set -- desktop
+fi
+exec "$app/node" "$app/src/main.js" "$@"
