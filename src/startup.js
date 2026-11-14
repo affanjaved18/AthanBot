@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dataDir } from './settings.js';
 import { run } from './audio.js';
 import { syncWake } from './wake.js';
+import { windowsStartup, windowsStartupEnabled } from './windows-startup.js';
 
 const label = 'org.athanbot.service';
 const entry = fileURLToPath(new URL('./main.js', import.meta.url));
@@ -48,16 +49,17 @@ function macService() {
 
 function linuxService() {
   const file = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user', 'athanbot.service');
+  const player = process.env.ATHANBOT_MPV;
+  const playerEnv = player ? 'Environment=' + systemd('ATHANBOT_MPV=' + player) + '\n' : '';
   const contents = `[Unit]
 Description=AthanBot prayer-time playback
-Wants=pipewire.socket wireplumber.service
 After=pipewire.socket wireplumber.service
 
 [Service]
 ExecStart=:${systemd(process.execPath)} ${systemd(entry)} run
 Environment=${systemd('PATH=' + paths)}
 Environment=${systemd('ATHANBOT_DATA_DIR=' + dataDir)}
-Restart=on-failure
+${playerEnv}Restart=on-failure
 RestartSec=5
 
 [Install]
@@ -67,6 +69,7 @@ WantedBy=default.target
 }
 
 export async function startupEnabled() {
+  if (process.platform === 'win32') return windowsStartupEnabled();
   const { file } = process.platform === 'darwin' ? macService() : linuxService();
   try {
     await access(file);
@@ -97,8 +100,9 @@ async function waitForMacServiceRemoval(target) {
 }
 
 export async function startup(settings, enable) {
+  if (process.platform === 'win32') return windowsStartup(entry, enable);
   const mac = process.platform === 'darwin';
-  if (!mac && process.platform !== 'linux') throw new Error('Automatic startup supports macOS and systemd Linux.');
+  if (!mac && process.platform !== 'linux') throw new Error('Automatic startup supports Windows, macOS, and systemd Linux.');
   const { domain, file, contents } = mac ? macService() : linuxService();
   const target = mac ? domain + '/' + label : undefined;
   if (enable) {

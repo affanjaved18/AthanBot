@@ -13,7 +13,7 @@ const library = join(dataDir, 'audio');
 const activePlayback = join(dataDir, 'active-playback');
 const bundle = fileURLToPath(new URL('../audio/', import.meta.url));
 const nativeAudio = process.env.ATHANBOT_MAC_AUDIO;
-const player = process.env.ATHANBOT_MPV || 'mpv';
+const player = process.env.ATHANBOT_MPV || (process.platform === 'win32' ? 'mpv.exe' : 'mpv');
 const common = ['--no-config', '--no-video', '--msg-level=all=warn'];
 export const maxAudioBytes = 32 * 1024 * 1024;
 
@@ -60,7 +60,7 @@ export async function importTrack(name, bytes) {
         const { stdout } = await run(player, [
           '--no-config', '--no-video', '--ao=null', '--length=0.2',
           '--term-playing-msg=ATHANBOT_AUDIO=${audio-codec-name}', '--', temporary,
-        ], { timeout: 10000 });
+        ], { timeout: 10000, windowsHide: true });
         if (!/^ATHANBOT_AUDIO=\S+/m.test(stdout) || stdout.includes('ATHANBOT_AUDIO=(unavailable)')) {
           throw new Error('No audio stream');
         }
@@ -89,7 +89,7 @@ export async function outputs() {
     const { stdout } = await run(nativeAudio, ['outputs'], { timeout: 5000 });
     return [{ id: 'auto', label: 'System default' }, ...JSON.parse(stdout)];
   }
-  const { stdout } = await run(player, ['--no-config', '--audio-device=help'], { timeout: 5000 });
+  const { stdout } = await run(player, ['--no-config', '--audio-device=help'], { timeout: 5000, windowsHide: true });
   const devices = stdout.split('\n').flatMap(line => {
     const match = line.match(/^\s*'([^']+)'\s*\((.*)\)\s*$/);
     return match && match[1] !== 'auto' && !match[1].startsWith('null')
@@ -172,6 +172,7 @@ export async function withPlaybackOutput(settings, deadline, playback) {
     return playback(device);
   };
   const { bluetoothAddress } = settings;
+  if (process.platform === 'linux' && bluetoothAddress) deadline ??= Date.now() + 30_000;
   if (process.platform !== 'darwin') return playOnOutput();
   if (!bluetoothAddress) {
     const assertion = settings.wake ? holdPlaybackWake(['-is', '-w', String(process.pid)]) : undefined;
@@ -250,7 +251,7 @@ async function runPlayback(executable, args, timeout) {
   const poll = setInterval(() => {
     void access(marker).catch(error => { if (error.code === 'ENOENT') abort.abort(); });
   }, 150);
-  const playback = run(executable, args, { timeout, signal: abort.signal, killSignal: 'SIGKILL' });
+  const playback = run(executable, args, { timeout, signal: abort.signal, killSignal: 'SIGKILL', windowsHide: true });
   const closed = new Promise(resolve => playback.child.once('close', resolve));
   const awake = process.platform === 'darwin'
     ? spawn('/usr/bin/caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' }) : undefined;

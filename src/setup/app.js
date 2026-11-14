@@ -172,18 +172,23 @@ async function initialize() {
   const settings = state.settings;
   for (const key of ['latitude', 'longitude', 'timeZone', 'asr', 'bluetoothAddress']) field(key).value = settings[key];
   field('wake').checked = settings.wake;
+  field('enable').checked = (!state.configured || state.enabled) && !state.startupError;
   if (state.desktop) {
     document.body.classList.add('desktop');
     for (const id of ['steps', 'wizard-actions', 'city-lookup', 'bluetooth-settings', 'paired-picker', 'play-now']) byId(id).hidden = false;
     byId('bluetooth-address').hidden = true;
     byId('mode').textContent = state.configured ? 'Settings' : 'First-time setup';
     byId('startup-note').textContent = 'Allow background playback to hear the Athan when the app window is closed. Reopen AthanBot any time to change settings.';
-    field('enable').checked = !state.configured || state.enabled;
     form.querySelector('[type=submit]').textContent = state.configured ? 'Save changes' : 'Finish setup';
     showPage(0);
     void wakeStatus().catch(() => { byId('install-wake').hidden = false; });
   }
   byId('mac').hidden = !state.mac;
+  if (state.windows) {
+    field('bluetoothAddress').value = '';
+    byId('bluetooth-address').hidden = true;
+    byId('startup-note').textContent = 'AthanBot starts when you sign in to Windows. Keep the computer awake for scheduled playback.';
+  }
   byId('bluetooth-playback-note').hidden = !state.mac;
   byId('time-zones').replaceChildren(...state.timeZones.map(zone => new Option(zone)));
   options(field('method'), [{ id: '', label: 'Choose a method' },
@@ -206,7 +211,8 @@ async function initialize() {
   byId('import').accept = state.audioExtensions.map(extension => '.' + extension).join(',');
   form.hidden = false;
   const outputError = state.desktop ? 'Could not list audio outputs. Try refreshing speakers.' : 'Speaker list unavailable. Install mpv and refresh speakers.';
-  status(Array.isArray(state.devices) ? '' : outputError, !Array.isArray(state.devices));
+  const error = state.startupError || (Array.isArray(state.devices) ? '' : outputError);
+  status(error, Boolean(error));
 }
 
 action('devices', async () => {

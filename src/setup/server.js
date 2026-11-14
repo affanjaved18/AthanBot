@@ -54,6 +54,7 @@ export async function setup(port = 0, { desktop = false } = {}) {
     return downloading;
   }
   const resolveTrack = id => id === alafasy.id ? getAlafasy() : id;
+  const startupState = () => startupEnabled().catch(error => ({ error: error.stderr?.trim() || error.message }));
   const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -76,12 +77,16 @@ export async function setup(port = 0, { desktop = false } = {}) {
 
       if (url.pathname === '/state') {
         const [devices, saved, enabled] = await Promise.all([
-          outputs().catch(error => ({ error: error.message })), readSettings(), desktop ? startupEnabled() : false,
+          outputs().catch(error => ({ error: error.message })), readSettings(),
+          startupState(),
         ]);
         return send(response, {
-          settings: saved || defaults, configured: Boolean(saved), enabled, desktop, library: await listTracks(), devices,
+          settings: saved || defaults, configured: Boolean(saved), enabled: enabled === true,
+          startupError: enabled.error, desktop, library: await listTracks(), devices,
           recommended: { id: alafasy.id, label: alafasy.label },
-          methods, highLatitudeRules, polarRules, prayers, audioExtensions: desktop ? audioExtensions.filter(extension => !['ogg', 'opus'].includes(extension)) : audioExtensions, mac: process.platform === 'darwin',
+          methods, highLatitudeRules, polarRules, prayers,
+          audioExtensions: desktop ? audioExtensions.filter(extension => !['ogg', 'opus'].includes(extension)) : audioExtensions,
+          mac: process.platform === 'darwin', windows: process.platform === 'win32',
           timeZones: Intl.supportedValuesOf('timeZone'),
         });
       }
@@ -147,7 +152,7 @@ export async function setup(port = 0, { desktop = false } = {}) {
           const saved = await saveSettings(settings);
           try {
             if (input.enable === true) await startup(saved, true);
-            else if (desktop && input.enable === false && await startupEnabled()) await startup(saved, false);
+            else if (input.enable === false && await startupEnabled()) await startup(saved, false);
           } catch (error) {
             throw new Error('Settings were saved, but the background playback setting could not be applied. ' + error.message);
           }

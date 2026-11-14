@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 
-test('loopback setup previews, validates and saves an offline configuration', async t => {
+test('loopback setup previews, validates and saves an offline configuration', { skip: process.platform === 'win32' && 'Uses a POSIX shell as a mock audio player' }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'athanbot-setup-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const fakePlayer = join(directory, 'mpv');

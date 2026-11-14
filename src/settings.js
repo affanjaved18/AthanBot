@@ -18,9 +18,13 @@ export const bundledTracks = new Map([
   ['prophets-mosque.ogg', 'Regular · Prophet’s Mosque (recording by ejaz215)'],
 ]);
 
-export const dataDir = resolve(process.env.ATHANBOT_DATA_DIR || (process.platform === 'darwin'
-  ? join(homedir(), 'Library', 'Application Support', 'AthanBot')
-  : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'athanbot')));
+function defaultDataDir() {
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'AthanBot');
+  if (process.platform === 'win32') return join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'AthanBot');
+  return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'athanbot');
+}
+
+export const dataDir = resolve(process.env.ATHANBOT_DATA_DIR || defaultDataDir());
 
 export const defaults = {
   latitude: '', longitude: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,

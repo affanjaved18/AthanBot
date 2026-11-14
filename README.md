@@ -1,9 +1,11 @@
 # AthanBot
 
-A background Athan clock for macOS and Raspberry Pi OS. AthanBot calculates
-Fajr, Dhuhr, Asr, Maghrib, and Isha locally using a fixed location, then plays
-a recording through the selected audio output. Open the Mac app for setup or
-to change settings later. The scheduler and audio files run on the device.
+AthanBot is a background Athan clock for macOS, Windows, and Linux, including
+Raspberry Pi OS. It calculates Fajr, Dhuhr, Asr, Maghrib, and Isha locally using
+a fixed location, then plays a recording through the selected audio output.
+The scheduler and recordings run on the device.
+
+[macOS setup](#install-the-mac-app) · [Windows setup](#windows-setup) · [Linux desktop setup](#linux-desktop-setup) · [Headless Raspberry Pi setup](#headless-raspberry-pi-os-setup)
 
 ## Install the Mac app
 
@@ -147,7 +149,65 @@ To stop the service and clear its alarms, run `node src/main.js disable`.
 To remove the optional privileged helper as well, run
 `./scripts/install-mac-wake.sh --remove`. Settings and recordings are kept.
 
-## Raspberry Pi OS setup
+## Windows setup
+
+1. Install [Node.js 22 or later](https://nodejs.org/en/download) and a Windows
+   build of [mpv](https://mpv.io/installation/). Extract mpv to a permanent
+   folder and add that folder to your Windows user `Path`. Open a new
+   PowerShell window and run `Get-Command mpv.exe` to confirm it is available.
+2. Open PowerShell in the AthanBot folder and run `npm.cmd run setup`. Open
+   the local address it prints in your browser.
+3. Enter your location and prayer conventions and choose a recording. Pair
+   and connect Bluetooth speakers in Windows Settings, then use **Refresh
+   speakers** and select the desired output. Windows manages the Bluetooth
+   connection. Use **Test playback** to play the selected recording.
+4. Save with **Enable automatic startup** selected. AthanBot registers a
+   Task Scheduler task for your account and starts it immediately. You can
+   then close the setup tab and PowerShell window. Keep Windows awake and
+   stay signed in for playback. You can lock the screen.
+
+To use a specific mpv executable, set `$env:ATHANBOT_MPV` to its full path
+before running setup or `node src/main.js enable`. AthanBot saves that path
+in the background task.
+
+Check the task and playback log from PowerShell:
+
+```powershell
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Get-ScheduledTask -TaskName "AthanBot-$sid"
+Get-Content "$env:LOCALAPPDATA\AthanBot\athanbot.log" -Tail 30
+```
+
+Look for `Running` in the task's `State` column. The log is created when the
+background task first writes output. Run `node src/main.js times 2` to check
+today's and tomorrow's prayer times using your saved settings.
+
+To remove automatic startup, uncheck it in setup and save, or run
+`node src/main.js disable`. Keep the project folder at a stable path while
+automatic startup is enabled.
+
+## Linux desktop setup
+
+1. Install Node.js 22 or later and mpv. Your distribution's `mpv` package is
+   suitable. For Bluetooth reconnection, install BlueZ and pair the speaker
+   through your desktop's Bluetooth settings.
+2. From the AthanBot folder, run `npm run setup` and open the local address
+   it prints. Set your location, calculation method, recordings, and speaker.
+   Use **Test playback** to confirm the selected output works. For automatic
+   Bluetooth reconnection, enter the paired speaker address shown by
+   `bluetoothctl devices Paired`.
+3. On a systemd distribution, save with **Enable automatic startup** selected.
+   AthanBot starts as a user service and can play after you close setup. Keep
+   your session signed in and the machine awake. For distributions without
+   systemd, clear the startup checkbox, save, and run `node src/main.js run`
+   in your session to keep the scheduler active.
+
+```sh
+systemctl --user status athanbot.service
+journalctl --user -u athanbot.service -n 30
+```
+
+### Headless Raspberry Pi OS setup
 
 Use Raspberry Pi OS with Node.js 22+ and WirePlumber 0.5 for headless Bluetooth.
 Run as the normal account that will own AthanBot. On a dedicated Pi that should
