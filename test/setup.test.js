@@ -57,12 +57,47 @@ esac
   const preview = await call('/preview', input);
   assert.equal(preview.status, 200);
   assert.equal((await preview.json()).length, 5);
+  const week = await (await call('/preview', { ...input, days: 7 })).json();
+  assert.equal(week.length, 7);
+  assert.ok(week.every(day => day.length === 5));
   assert.equal((await call('/save', { ...input, audio: {} })).status, 400);
-  assert.equal((await call('/save', input)).status, 200);
+  assert.equal((await call('/save', { ...input, volumes: { fajr: 0, isha: 25 } })).status, 200);
   const saved = await (await call('/state')).json();
   assert.equal(saved.settings.audio.default, id);
   assert.equal(saved.settings.audio.fajr, 'malmo-fajr.opus');
   assert.equal(saved.settings.device, 'pipewire/test');
+  assert.deepEqual(saved.settings.volumes, { fajr: 0, isha: 25 });
+
+  const initialStatus = await (await call('/status')).json();
+  assert.equal(initialStatus.running, false);
+  assert.equal(initialStatus.speaker.label, 'Test speaker');
+  assert.equal((await call('/skip-next', { id: initialStatus.next.id })).status, 200);
+  const skipped = await (await call('/status')).json();
+  assert.notEqual(skipped.next.id, initialStatus.next.id);
+  assert.equal(skipped.history[0].outcome, 'skipped');
+  assert.equal((await call('/scheduled-test')).status, 400);
+  const { markSchedulerRunning, schedulePlaybackTest } = await import('../src/playback-status.js');
+  await markSchedulerRunning(Date.now());
+  const scheduled = await (await call('/scheduled-test')).json();
+  assert.ok(scheduled.at >= Date.now() + 175_000);
+  assert.equal((await call('/scheduled-test')).status, 400);
+  assert.equal((await (await call('/status')).json()).tests[0].id, scheduled.id);
+  const due = await schedulePlaybackTest(Date.now() - 180_000);
+  const scheduler = new URL('../src/main.js', import.meta.url);
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const worker = spawn(process.execPath, [fileURLToPath(scheduler), 'run'], { stdio: 'ignore' });
+  t.after(() => worker.kill());
+  let result;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const current = await (await call('/status')).json();
+    result = current.history.find(record => record.id === due.id && record.outcome !== 'playing');
+    if (result) break;
+    await delay(30);
+  }
+  worker.kill();
+  assert.equal(result?.outcome, 'played');
+  assert.deepEqual(result.output, { id: 'pipewire/test', label: 'Test speaker', fallback: false });
 
   let downloads = 0;
   const fetchLocal = globalThis.fetch;
@@ -121,7 +156,9 @@ esac
   await waitForPlayer();
   assert.equal((await call('/stop-playback', null, false)).status, 403);
   assert.deepEqual(await (await call('/stop-playback')).json(), { stopped: true });
-  assert.deepEqual(await (await playing).json(), { ok: true, stopped: true });
+  assert.deepEqual(await (await playing).json(), {
+    ok: true, stopped: true, output: { id: 'pipewire/test', label: 'Test speaker', fallback: false },
+  });
 
   const audioModule = new URL('../src/audio.js', import.meta.url).href;
   const background = promisify(execFile)(process.execPath, ['--input-type=module', '-e', `

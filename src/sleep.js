@@ -33,7 +33,7 @@ export async function scheduleSleepTest(settings, seconds, useChime = false, pra
           await run('/usr/bin/caffeinate', ['-is', '/usr/bin/afplay', '/System/Library/Sounds/Glass.aiff']);
         } else {
           const file = trackPath(settings.audio[prayer] || settings.audio.default);
-          return await withPlaybackOutput({ ...settings, wake: true }, at + grace, device => play(file, device));
+          return await withPlaybackOutput({ ...settings, wake: true }, at + grace, device => play(file, device, false, settings.volumes?.[prayer]));
         }
       } finally {
         await syncWake('test', []).catch(() => {});

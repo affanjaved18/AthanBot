@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { audioExtensions, bundledTracks, dataDir, importedAudio } from './settings.js';
+import { audioExtensions, bundledTracks, dataDir, defaultVolume, importedAudio } from './settings.js';
 
 export const run = promisify(execFile);
 const library = join(dataDir, 'audio');
@@ -115,16 +115,21 @@ async function disconnectBluetooth({ bluetoothAddress, device }) {
   else await run('blueutil', ['--disconnect', bluetoothAddress.replaceAll(':', '-')], { timeout: 7000 });
 }
 
+export function normalizeOutput(id) {
+  return nativeAudio ? id?.replace(/^avfoundation\//, 'coreaudio/') : id;
+}
+
 async function readyOutput(settings, deadline) {
-  const preferred = nativeAudio ? settings.device.replace(/^avfoundation\//, 'coreaudio/') : settings.device;
-  const fallback = nativeAudio ? settings.fallback?.replace(/^avfoundation\//, 'coreaudio/') : settings.fallback;
+  const preferred = normalizeOutput(settings.device);
+  const fallback = normalizeOutput(settings.fallback);
   let lastError;
   let reconnectAt = 0;
   let linkOpened = false;
   const retryUntil = deadline - (settings.fallback ? 8000 : 1000);
   do {
     try {
-      if ((await outputs()).some(device => device.id === preferred)) return preferred;
+      const output = (await outputs()).find(device => device.id === preferred);
+      if (output) return { ...output, fallback: false };
     } catch (error) {
       lastError = error;
     }
@@ -142,7 +147,8 @@ async function readyOutput(settings, deadline) {
           linkOpened = true;
           lastError = undefined;
           if (nativeAudio && Number.isFinite(reconnectAt)) reconnectAt = Date.now() + 8000;
-          if ((await outputs()).some(device => device.id === preferred)) return preferred;
+          const output = (await outputs()).find(device => device.id === preferred);
+          if (output) return { ...output, fallback: false };
         }
       } catch (error) {
         lastError = error;
@@ -151,7 +157,10 @@ async function readyOutput(settings, deadline) {
     if (Date.now() + 1000 >= retryUntil) break;
     await delay(1000);
   } while (Date.now() < retryUntil);
-  if (fallback && (await outputs()).some(device => device.id === fallback)) return fallback;
+  if (fallback) {
+    const output = (await outputs()).find(device => device.id === fallback);
+    if (output) return { ...output, fallback: true };
+  }
   if (lastError) throw new Error(lastError.stderr?.trim() || lastError.message);
   if (nativeAudio && linkOpened) {
     throw new Error('Bluetooth connected, but macOS did not make the selected speaker available for audio.');
@@ -169,7 +178,7 @@ export async function withPlaybackOutput(settings, deadline, playback) {
   const playOnOutput = async () => {
     const device = await readyOutput(settings, deadline ?? Date.now());
     if (deadline !== undefined && Date.now() >= deadline) throw new Error('Playback window expired');
-    return playback(device);
+    return playback(device.id, device);
   };
   const { bluetoothAddress } = settings;
   if (process.platform === 'linux' && bluetoothAddress) deadline ??= Date.now() + 30_000;
@@ -270,13 +279,14 @@ async function runPlayback(executable, args, timeout) {
   }
 }
 
-export async function play(file, device, preview = false) {
+export async function play(file, device, preview = false, volume = defaultVolume) {
   await access(file);
   const legacyAudio = nativeAudio && /\.(ogg|opus)$/i.test(file);
   const timeout = 15 * 60 * 1000;
   if (nativeAudio && !legacyAudio) {
     const args = ['play', file, device];
     if (preview) args.push('preview');
+    if (volume !== defaultVolume) args.push(String(volume));
     return runPlayback(nativeAudio, args, preview ? 25000 : timeout);
   }
   // Existing CLI installations may have saved Ogg files and already have mpv.
@@ -286,7 +296,7 @@ export async function play(file, device, preview = false) {
     throw new Error('Reimport this recording as MP3, M4A, or WAV to play it in the Mac app.');
   });
   const limit = preview ? ['--length=8'] : [];
-  return runPlayback(executable, [...common, ...limit, '--volume=50', '--audio-fallback-to-null=no', `--audio-device=${device}`, '--', file], timeout);
+  return runPlayback(executable, [...common, ...limit, `--volume=${volume}`, '--audio-fallback-to-null=no', `--audio-device=${device}`, '--', file], timeout);
 }
 
 export async function preparePlayback(settings) {

@@ -84,7 +84,7 @@ enum AudioFailure: LocalizedError {
     }
 }
 
-func playAudio(_ path: String, output: String, preview: Bool) throws {
+func playAudio(_ path: String, output: String, preview: Bool, volume: Int) throws {
     let uid: String?
     if output == "auto" {
         uid = nil
@@ -98,7 +98,7 @@ func playAudio(_ path: String, output: String, preview: Bool) throws {
 
     let item = AVPlayerItem(url: URL(fileURLWithPath: path))
     let player = AVPlayer(playerItem: item)
-    player.volume = 0.5
+    player.volume = Float(volume) / 100
     player.audioOutputDeviceUniqueID = uid
     if preview { item.forwardPlaybackEndTime = CMTime(seconds: 8, preferredTimescale: 600) }
     var finished = false
@@ -160,8 +160,15 @@ do {
         }
         try file.read(into: buffer)
         if buffer.frameLength == 0 { throw AudioFailure.message("The recording has no audio.") }
-    case "play" where args.count == 3 || (args.count == 4 && args[3] == "preview"):
-        try playAudio(args[1], output: args[2], preview: args.count == 4)
+    case "play" where args.count >= 3:
+        var options = args.dropFirst(3)
+        let preview = options.first == "preview"
+        if preview { options = options.dropFirst() }
+        let volume = options.isEmpty ? 50 : Int(options.first ?? "")
+        guard options.count <= 1, let volume, (0...100).contains(volume) else {
+            throw AudioFailure.message("Volume must be a whole percentage from 0 to 100.")
+        }
+        try playAudio(args[1], output: args[2], preview: preview, volume: volume)
     default:
         throw AudioFailure.message("Invalid audio command.")
     }

@@ -2,11 +2,13 @@ import { access, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { audioExtensions, defaults, highLatitudeRules, methods, outputSettings, polarRules, prayers, readSettings, saveSettings, validate } from '../settings.js';
-import { importTrack, listTracks, maxAudioBytes, outputs, pairedBluetooth, play, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
+import { importTrack, listTracks, maxAudioBytes, normalizeOutput, outputs, pairedBluetooth, play, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
 import { upcomingDays } from '../prayers.js';
 import { startup, startupEnabled } from '../startup.js';
 import { scheduleSleepTest } from '../sleep.js';
 import { syncWake } from '../wake.js';
+import { claimEvent } from '../scheduler.js';
+import { eventDirectory, nextPrayer, playbackHistory, recordPlayback, scheduledTests, schedulePlaybackTest, schedulerRunning } from '../playback-status.js';
 
 const alafasy = {
   id: 'download-alafasy',
@@ -42,6 +44,7 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
   let testingAudio = false;
   let saving = false;
   let downloading;
+  let schedulingTest = false;
   let idleTimer;
   let requests = 0;
   function resetIdleTimer() {
@@ -104,6 +107,39 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
         return send(response, { available: await syncWake('check', []).then(() => true, () => false) });
       }
       if (url.pathname === '/devices') return send(response, await outputs());
+      if (url.pathname === '/status') {
+        const saved = await readSettings();
+        const now = Date.now();
+        const checkIn = schedulerRunning(now);
+        const [running, next, history, devices, paired, tests] = await Promise.all([
+          checkIn, saved ? nextPrayer(saved, now) : null, playbackHistory(now, checkIn),
+          saved ? outputs().catch(() => null) : null, saved?.bluetoothAddress ? pairedBluetooth().catch(() => []) : [],
+          scheduledTests(),
+        ]);
+        const preferred = saved && devices?.find(device => device.id === normalizeOutput(saved.device));
+        const bluetooth = paired.find(speaker => speaker.address === saved?.bluetoothAddress);
+        return send(response, {
+          running, next, history, tests: tests.filter(test => !history.some(record => record.id === test.id)), timeZone: saved?.timeZone,
+          speaker: saved && {
+            label: preferred?.label || bluetooth?.name || saved.deviceLabel || (saved.device === 'auto' ? 'System default' : saved.device),
+            available: devices ? Boolean(preferred) : null,
+            reconnect: Boolean(saved.bluetoothAddress) && (!desktop || Boolean(bluetooth)),
+            fallback: saved.fallback && (devices?.find(device => device.id === normalizeOutput(saved.fallback))?.label || saved.fallbackLabel || saved.fallback),
+          },
+        });
+      }
+      if (url.pathname === '/scheduled-test') {
+        if (schedulingTest) throw new Error('A test is already being scheduled.');
+        schedulingTest = true;
+        try {
+          if (!(await readSettings())?.audio.default) throw new Error('Save your speaker and recording settings first.');
+          if (!await schedulerRunning()) throw new Error('Start the background scheduler before scheduling a test.');
+          if ((await scheduledTests()).length) throw new Error('A scheduled test is already pending or playing.');
+          return send(response, await schedulePlaybackTest());
+        } finally {
+          schedulingTest = false;
+        }
+      }
       if (url.pathname === '/upload') {
         const id = await importTrack(url.searchParams.get('name') || '', await body(request, maxAudioBytes));
         return send(response, { id, library: await listTracks() });
@@ -114,17 +150,32 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
       }
       const input = JSON.parse((await body(request, 64 * 1024)).toString('utf8') || '{}');
       if (url.pathname === '/preview') {
-        const settings = validate({ ...input, audio: {}, device: 'auto', fallback: '', bluetoothAddress: '' });
-        return send(response, upcomingDays(settings, Date.now(), 1)[0]);
+        const settings = validate({ ...input, audio: {}, volumes: {}, device: 'auto', fallback: '', bluetoothAddress: '' });
+        const days = upcomingDays(settings, Date.now(), input.days === 7 ? 7 : 1);
+        return send(response, input.days === 7 ? days : days[0]);
+      }
+      if (url.pathname === '/skip-next') {
+        const saved = await readSettings();
+        const now = Date.now();
+        const next = saved && await nextPrayer(saved, now);
+        if (!next || next.id !== input.id || next.at <= Date.now() || !await claimEvent(eventDirectory, next, 'skipped')) {
+          throw new Error('The next prayer changed. Refresh status before skipping.');
+        }
+        await recordPlayback(next, { outcome: 'skipped', updatedAt: now });
+        return send(response, next);
       }
       if (url.pathname === '/play') {
         if (testingAudio) throw new Error('Test playback is already running.');
         testingAudio = true;
         try {
-          const settings = { ...outputSettings(input), fallback: '' };
+          const settings = outputSettings(input);
           const file = trackPath(await resolveTrack(input.track));
-          const finished = await withPlaybackOutput(settings, undefined, device => play(file, device, desktop && input.full !== true));
-          return send(response, { ok: true, stopped: finished === false });
+          let output;
+          const finished = await withPlaybackOutput(settings, undefined, async (device, selected) => {
+            output = selected;
+            return play(file, device, desktop && input.full !== true);
+          });
+          return send(response, { ok: true, stopped: finished === false, output });
         } finally {
           testingAudio = false;
         }

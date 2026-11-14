@@ -30,6 +30,12 @@ details { margin-top: 1rem; }
 summary { cursor: pointer; margin-bottom: .55rem; }
 .times { display: grid; grid-template-columns: minmax(5rem, 1fr) 2fr; max-width: 28rem; gap: .25rem .65rem; }
 dd { margin: 0; }
+#dashboard .times { max-width: none; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { padding: .65rem 0; border-top: 1px solid #d8e1d8; overflow-wrap: anywhere; }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+.table-scroll th, .table-scroll td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #d8e1d8; }
 #message { position: sticky; bottom: .5rem; padding: .6rem .8rem; background: #dcebe0; border-radius: .4rem; }
 #message:empty { display: none; }
 #message.error { color: #7c1f1f; background: #f9dddd; }

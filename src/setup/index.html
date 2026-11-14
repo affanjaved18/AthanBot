@@ -15,6 +15,30 @@
       <p>Set the prayer times and choose where the Athan plays.</p>
       <button type="button" id="stop-playback">Stop Athan</button>
     </header>
+    <section id="dashboard" hidden>
+      <h2>Playback status</h2>
+      <dl class="times">
+        <dt>Scheduler</dt><dd id="scheduler-status"></dd>
+        <dt>Next Athan</dt><dd id="next-prayer"></dd>
+        <dt>Speaker</dt><dd id="scheduled-speaker"></dd>
+      </dl>
+      <div class="actions">
+        <button type="button" id="refresh-status">Refresh status</button>
+        <button type="button" id="scheduled-test">Test in 3 minutes</button>
+        <button type="button" id="skip-next" hidden>Skip next Athan</button>
+        <button type="button" id="toggle-settings">Edit settings</button>
+      </div>
+      <p id="pending-tests" hidden></p>
+      <div id="confirm-skip" class="actions" hidden>
+        <button type="button" id="confirm-skip-button">Confirm skip</button>
+        <button type="button" id="cancel-skip">Cancel</button>
+      </div>
+      <details open>
+        <summary>Recent playback</summary>
+        <p id="empty-history">Recorded outcomes will appear here.</p>
+        <ul id="playback-history" class="history"></ul>
+      </details>
+    </section>
     <nav id="steps" aria-label="Setup steps" hidden>
       <button type="button" data-step="0">1. Location</button>
       <button type="button" data-step="1">2. Audio</button>
@@ -57,8 +81,12 @@
         </details>
         <div class="actions">
           <button type="button" id="preview">Preview today</button>
+          <button type="button" id="preview-week">Preview 7 days</button>
         </div>
         <dl id="times" class="times" hidden></dl>
+        <div id="weekly-preview" class="table-scroll" tabindex="0" role="region" aria-label="Seven-day prayer preview" hidden>
+          <table id="weekly-times"></table>
+        </div>
       </section>
 
       <section data-page="1">
@@ -72,6 +100,11 @@
         <details>
           <summary>Different recordings by prayer</summary>
           <div id="tracks" class="grid"></div>
+        </details>
+        <details>
+          <summary>Volume by prayer</summary>
+          <p>Leave a field blank to use the default 50% volume.</p>
+          <div id="volumes" class="grid"></div>
         </details>
       </section>
 

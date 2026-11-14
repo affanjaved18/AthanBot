@@ -17,6 +17,8 @@ const ruleNames = {
 };
 let state;
 let page = 0;
+let nextAthan;
+let prayerToSkip;
 const desktop = (action, data = {}) => window.webkit?.messageHandlers?.athanbot?.postMessage({ action, ...data });
 
 function showPage(next) {
@@ -125,10 +127,12 @@ function library(entries, saved = {}) {
   }
 }
 
-function devices(entries, primary = field('device').value, fallback = field('fallback').value) {
-  for (const id of [primary, fallback]) {
+function devices(entries, primary = field('device').value, fallback = field('fallback').value, labels = {}) {
+  for (const [id, savedLabel] of [[primary, labels.deviceLabel], [fallback, labels.fallbackLabel]]) {
     if (id && !entries.some(entry => entry.id === id)) {
-      entries = [...entries, { id, label: id + ' (currently unavailable)' }];
+      const label = savedLabel || id;
+      const reconnect = id === primary && field('bluetoothAddress').value;
+      entries = [...entries, { id, label: label + (reconnect ? ' (connects at playback)' : ' (currently unavailable)') }];
     }
   }
   options(field('device'), entries, primary);
@@ -142,9 +146,58 @@ function input() {
     method: values.get('method'), asr: values.get('asr'), highLatitude: values.get('highLatitude'),
     polar: values.get('polar'), offsets: Object.fromEntries(state.prayers.map(name => [name, values.get('offset-' + name)])),
     audio: Object.fromEntries(['default', ...state.prayers].map(name => [name, values.get('track-' + name)])),
-    ...audioInput(), wake: field('wake').checked, enable: field('enable').checked,
+    volumes: Object.fromEntries(state.prayers.map(name => [name, values.get('volume-' + name)])),
+    ...audioInput(), ...speakerLabels(), wake: field('wake').checked, enable: field('enable').checked,
   };
 }
+
+function speakerLabels() {
+  return Object.fromEntries(['device', 'fallback'].map(name => [
+    name + 'Label', field(name).selectedOptions[0]?.textContent.replace(/ \((currently unavailable|connects at playback)\)$/, '') || '',
+  ]));
+}
+
+const outcomes = { playing: 'Playing', played: 'Played', stopped: 'Stopped', missed: 'Missed · playback window passed', failed: 'Failed', skipped: 'Skipped once', unknown: 'Playback result unknown' };
+
+async function refreshDashboard() {
+  const { running, next, speaker, history, tests, timeZone } = await api('/status');
+  const format = new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
+  nextAthan = next;
+  byId('skip-next').hidden = !next;
+  byId('scheduler-status').textContent = running ? 'Running' : 'Waiting for scheduler check-in';
+  byId('next-prayer').textContent = next ? names[next.prayer] + ' · ' + format.format(next.at) : 'No upcoming prayer time found';
+  const availability = speaker?.available === false ? (speaker.reconnect ? ' · Connects at playback' : ' · Currently unavailable') : '';
+  byId('scheduled-speaker').textContent = speaker ? speaker.label + availability
+    + (speaker.fallback ? ' · Fallback: ' + speaker.fallback : '') : 'Choose a speaker in settings';
+  byId('empty-history').hidden = history.length > 0;
+  byId('pending-tests').hidden = tests.length === 0;
+  byId('pending-tests').textContent = tests.map(test => test.at > Date.now()
+    ? 'Test scheduled for ' + format.format(test.at)
+    : 'Test due · waiting for scheduler').join(' · ');
+  byId('playback-history').replaceChildren(...history.map(({ prayer, at, outcome, output, detail }) => {
+    const item = document.createElement('li');
+    const title = document.createElement('strong');
+    title.textContent = (names[prayer] || 'Scheduled test') + ' · ' + format.format(at);
+    const result = document.createElement('div');
+    result.textContent = outcomes[outcome] + (output ? ' · ' + output.label + (output.fallback ? ' (fallback)' : '') : '');
+    item.append(title, result);
+    if (detail) {
+      const note = document.createElement('small');
+      note.textContent = detail;
+      item.append(note);
+    }
+    return item;
+  }));
+}
+
+function showDashboard() {
+  byId('dashboard').hidden = false;
+  void refreshDashboard().catch(error => status(error.message, true));
+}
+
+setInterval(() => {
+  if (!document.hidden && !byId('dashboard').hidden) void refreshDashboard().catch(() => {});
+}, 15_000);
 
 function audioInput() {
   return {
@@ -199,6 +252,8 @@ async function initialize() {
   for (const prayer of state.prayers) {
     const offset = dynamicField(byId('offsets'), names[prayer] + ' offset in minutes', 'offset-' + prayer, document.createElement('input'));
     Object.assign(offset, { type: 'number', min: -120, max: 120, step: 1, value: settings.offsets[prayer] ?? 0 });
+    const volume = dynamicField(byId('volumes'), names[prayer] + ' volume (%)', 'volume-' + prayer, document.createElement('input'));
+    Object.assign(volume, { type: 'number', min: 0, max: 100, step: 1, value: settings.volumes[prayer] ?? '', placeholder: '50' });
   }
   for (const track of ['default', ...state.prayers]) {
     const select = dynamicField(byId(track === 'default' ? 'default-track' : 'tracks'), names[track] || 'Default Athan', 'track-' + track, document.createElement('select'));
@@ -207,16 +262,50 @@ async function initialize() {
   if (state.desktop && !settings.asr) field('asr').value = 'standard';
   library(state.library, settings.audio);
   const outputId = id => state.desktop ? id.replace(/^avfoundation\//, 'coreaudio/') : id;
-  devices(Array.isArray(state.devices) ? state.devices : [{ id: 'auto', label: 'System default' }], outputId(settings.device), outputId(settings.fallback));
+  devices(Array.isArray(state.devices) ? state.devices : [{ id: 'auto', label: 'System default' }], outputId(settings.device), outputId(settings.fallback), settings);
   byId('import').accept = state.audioExtensions.map(extension => '.' + extension).join(',');
   form.hidden = false;
   const outputError = state.desktop ? 'Could not list audio outputs. Try refreshing speakers.' : 'Speaker list unavailable. Install mpv and refresh speakers.';
   const error = state.startupError || (Array.isArray(state.devices) ? '' : outputError);
   status(error, Boolean(error));
+  if (state.configured) {
+    form.hidden = true;
+    byId('steps').hidden = true;
+    showDashboard();
+  }
 }
 
+action('refresh-status', refreshDashboard);
+action('scheduled-test', async () => {
+  await api('/scheduled-test');
+  await refreshDashboard();
+  status('Test scheduled with your saved recording and speaker. You can close this window.');
+});
+byId('skip-next').addEventListener('click', () => {
+  prayerToSkip = nextAthan;
+  if (!prayerToSkip) return;
+  byId('confirm-skip-button').textContent = 'Skip ' + names[prayerToSkip.prayer] + ' once';
+  byId('confirm-skip').hidden = false;
+  byId('confirm-skip-button').focus();
+});
+byId('cancel-skip').addEventListener('click', () => {
+  byId('confirm-skip').hidden = true;
+  byId('skip-next').focus();
+});
+action('confirm-skip-button', async () => {
+  const prayer = prayerToSkip;
+  byId('confirm-skip').hidden = true;
+  await api('/skip-next', { id: prayer.id });
+  await refreshDashboard();
+  status('Skipped the upcoming ' + names[prayer.prayer] + ' Athan.');
+});
+byId('toggle-settings').addEventListener('click', () => {
+  form.hidden = !form.hidden;
+  byId('steps').hidden = !state.desktop || form.hidden;
+  byId('toggle-settings').textContent = form.hidden ? 'Edit settings' : 'Hide settings';
+});
 action('devices', async () => {
-  devices(await api('/devices'));
+  devices(await api('/devices'), field('device').value, field('fallback').value, speakerLabels());
   if (state.desktop) await loadPaired();
   status('Speaker list refreshed.');
 });
@@ -233,7 +322,39 @@ action('preview', async () => {
     return [label, time];
   }));
   list.hidden = false;
+  byId('weekly-preview').hidden = true;
   status('Preview uses the configured location and prayer conventions.');
+});
+action('preview-week', async () => {
+  const settings = input();
+  const days = await api('/preview', { ...settings, days: 7 });
+  const date = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
+  const format = new Intl.DateTimeFormat(undefined, { timeZone: settings.timeZone, timeStyle: 'short' });
+  const dateKey = new Intl.DateTimeFormat('sv-SE', { timeZone: settings.timeZone, dateStyle: 'short' });
+  const table = byId('weekly-times');
+  table.replaceChildren();
+  const header = table.createTHead().insertRow();
+  for (const label of ['Date', ...state.prayers.map(prayer => names[prayer])]) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = label;
+    header.append(cell);
+  }
+  const body = table.createTBody();
+  for (const events of days) {
+    const row = body.insertRow();
+    const day = events[0].day;
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.textContent = date.format(new Date(day + 'T12:00:00Z'));
+    row.append(label);
+    for (const { at } of events) {
+      row.insertCell().textContent = at === null ? 'Unavailable' : format.format(at)
+        + (dateKey.format(at) > day ? ' (+1 day)' : dateKey.format(at) < day ? ' (−1 day)' : '');
+    }
+  }
+  byId('times').hidden = true;
+  byId('weekly-preview').hidden = false;
 });
 action('alafasy', async () => {
   status('Downloading the Alafasy recording…');
@@ -258,8 +379,8 @@ action('import', async () => {
 });
 action('play', async () => {
   status('Testing the selected speaker…');
-  const { stopped } = await api('/play', audioInput());
-  status(stopped ? 'Athan stopped.' : 'Test playback finished.');
+  const { stopped, output } = await api('/play', audioInput());
+  status(stopped ? 'Athan stopped.' : 'Test played on ' + output.label + (output.fallback ? ' (fallback).' : '.'));
 });
 action('play-now', async () => {
   status('Preparing the selected speaker and starting playback…');
@@ -291,6 +412,8 @@ form.addEventListener('submit', async event => {
       button.textContent = 'Save changes';
     }
     status(field('enable').checked ? 'Settings saved and automatic startup enabled.' : 'Settings saved.');
+    byId('toggle-settings').textContent = 'Hide settings';
+    showDashboard();
   } catch (error) {
     status(error.message, true);
   } finally {

@@ -52,6 +52,8 @@ test('validates deployment configuration and rejects track path traversal', () =
   assert.throws(() => validate({ ...observer, offsets: { fajr: 2.5 } }), /whole minutes/);
   assert.throws(() => validate({ ...observer, audio: { default: '../track.mp3' } }), /audio library/);
   assert.throws(() => validate({ ...observer, bluetoothAddress: 'AA:BB:CC:DD:EE:FF' }), /preferred output/);
+  assert.throws(() => validate({ ...observer, volumes: { fajr: 101 } }), /volume/);
+  assert.throws(() => validate({ ...observer, volumes: { fajr: 25.5 } }), /whole percentage/);
 });
 
 test('deduplicates concurrent playback and restart using a persistent claim', async t => {

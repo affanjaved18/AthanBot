@@ -1,10 +1,11 @@
 import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { addDays, calculateDay, localDay } from './prayers.js';
-import { dataDir, readSettings } from './settings.js';
+import { addDays, localDay } from './prayers.js';
+import { readSettings } from './settings.js';
 import { play, preparePlayback, trackPath, withPlaybackOutput } from './audio.js';
 import { syncWake, wakeLead } from './wake.js';
+import { eventDirectory, forgetPlayback, forgetTest, markSchedulerRunning, prayerId, recordPlayback, scheduledPrayers, scheduledTests, testId } from './playback-status.js';
 
 export const grace = 60_000;
 const interval = 2000;
@@ -16,7 +17,7 @@ export function dueEvents(events, now, previous, waiting = new Set()) {
 }
 
 export async function claimEvent(directory, event, status) {
-  if (!/^\d{4}-\d{2}-\d{2}-(fajr|dhuhr|asr|maghrib|isha)$/.test(event.id)) {
+  if (!prayerId.test(event.id) && !testId.test(event.id)) {
     throw new Error('Invalid prayer event ID');
   }
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -30,23 +31,34 @@ export async function claimEvent(directory, event, status) {
 }
 
 export async function dispatch(event, settings, {
-  claim, playback, report, now = Date.now, withOutput = withPlaybackOutput,
+  claim, playback, report, now = Date.now, withOutput = withPlaybackOutput, record = async () => {},
 }) {
   if (!await claim(event, now() - event.at >= grace ? 'missed' : 'attempted')) return;
+  const history = (outcome, extra) => record(event, { outcome, updatedAt: now(), ...extra })
+    .catch(error => report(`Could not save playback history: ${error.message}`));
   if (now() - event.at >= grace) {
+    await history('missed');
     report(`Missed ${event.id} while unavailable.`);
     return;
   }
+  let output;
+  let outcome;
   try {
     const track = settings.audio[event.prayer] || settings.audio.default;
     if (!track) throw new Error('Choose a default Athan recording.');
-    const finished = await withOutput(settings, event.at + grace, async device => {
+    await withOutput(settings, event.at + grace, async (device, selected) => {
       if (now() - event.at >= grace) throw new Error('Playback window expired');
       report(`Playing ${event.id} on ${device}.`);
-      return playback(track, device);
+      output = selected ?? { id: device, label: device, fallback: device === settings.fallback };
+      await history('playing', { output });
+      if (now() - event.at >= grace) throw new Error('Playback window expired');
+      const finished = await playback(track, device);
+      outcome = finished === false ? 'stopped' : 'played';
     });
-    report(`${finished === false ? 'Stopped' : 'Finished'} ${event.id}.`);
+    await history(outcome, { output });
+    report(`${outcome === 'stopped' ? 'Stopped' : 'Finished'} ${event.id}.`);
   } catch (error) {
+    await history(outcome || 'failed', { output, detail: error.stderr?.trim() || error.message });
     report(`Playback failed for ${event.id}: ${error.message}`);
   }
 }
@@ -56,12 +68,14 @@ function report(message) {
 }
 
 export async function runScheduler() {
-  const directory = join(dataDir, 'events');
+  const directory = eventDirectory;
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const seen = new Set(await readdir(directory));
+  const inFlight = new Set();
   const prepared = new Set();
   const waiting = new Set();
   let previous;
+  let lastHeartbeat = 0;
   let scheduleKey;
   let wakeKey;
   let retryWakeAt = 0;
@@ -85,24 +99,32 @@ export async function runScheduler() {
       const nextKey = today + JSON.stringify(settings);
       if (nextKey !== scheduleKey) {
         scheduleKey = nextKey;
-        events = [-1, 0, 1, 2].flatMap(offset => calculateDay(addDays(today, offset), settings));
-        for (const event of events.filter(event => event.day === today && event.at === null)) {
-          report(`Unavailable prayer time for ${event.id}.`);
-        }
-        events = events.filter(event => event.at !== null).sort((first, second) => first.at - second.at);
+        events = scheduledPrayers(settings, now);
         prepared.clear();
         waiting.clear();
         const cutoff = addDays(today, -35);
         for (const id of seen) {
-          if (id.slice(0, 10) >= cutoff) continue;
+          const oldPrayer = prayerId.test(id) && id.slice(0, 10) < cutoff;
+          const oldTest = testId.test(id) && Number(id.slice(5, 18)) < now - 35 * 86400_000;
+          if (!oldPrayer && !oldTest) continue;
           await unlink(join(directory, id)).catch(error => {
             if (error.code !== 'ENOENT') throw error;
           });
+          await forgetPlayback(id);
           seen.delete(id);
         }
       }
 
-      const due = dueEvents(events, now, previous, waiting).filter(event => !seen.has(event.id));
+      if (now - lastHeartbeat >= 5000 || now < lastHeartbeat) {
+        await markSchedulerRunning(now).catch(error => report(`Could not record scheduler check-in: ${error.message}`));
+        lastHeartbeat = now;
+      }
+
+      const tests = await scheduledTests();
+      for (const id of await readdir(directory)) seen.add(id);
+      for (const test of tests.filter(test => seen.has(test.id) && !inFlight.has(test.id))) await forgetTest(test.id);
+      const due = [...dueEvents(events, now, previous, waiting), ...tests.filter(test => test.at <= now)]
+        .filter(event => !seen.has(event.id));
       for (const event of due) {
         if (now - event.at < grace && active) {
           waiting.add(event.id);
@@ -110,28 +132,32 @@ export async function runScheduler() {
         }
         waiting.delete(event.id);
         seen.add(event.id);
+        inFlight.add(event.id);
         const playing = now - event.at < grace;
         if (playing) active = true;
         void dispatch(event, settings, {
           claim: (target, status) => claimEvent(directory, target, status),
-          playback: (track, device) => play(trackPath(track), device),
-          report,
+          playback: (track, device) => play(trackPath(track), device, false, settings.volumes[event.prayer]),
+          report, record: recordPlayback,
         }).catch(error => {
           seen.delete(event.id);
           report(error.message);
-        }).finally(() => { if (playing) active = false; });
+        }).finally(() => {
+          inFlight.delete(event.id);
+          if (playing) active = false;
+        });
       }
       previous = now;
 
-      const upcoming = events.find(event => event.at > now && event.at - now <= wakeLead && !seen.has(event.id));
+      const upcoming = [...events, ...tests].find(event => event.at > now && event.at - now <= wakeLead && !seen.has(event.id));
       if (upcoming && !active && !prepared.has(upcoming.id)) {
         prepared.add(upcoming.id);
         void preparePlayback(settings).catch(error => report(`Playback preparation: ${error.message}`));
       }
       if (process.platform === 'darwin' && now >= retryWakeAt) {
         const wakes = settings.wake
-          ? events.filter(event => !seen.has(event.id) && event.at - wakeLead > now + 5000)
-            .slice(0, 10).map(event => event.at - wakeLead)
+          ? [...events, ...tests].filter(event => !seen.has(event.id) && event.at - wakeLead > now + 5000)
+            .map(event => event.at - wakeLead).sort((a, b) => a - b).slice(0, 10)
           : [];
         const key = JSON.stringify(wakes);
         if (key !== wakeKey && (settings.wake || wakeKey)) {

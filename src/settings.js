@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 export const prayers = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
+export const defaultVolume = 50;
 export const methods = [
   'MuslimWorldLeague', 'NorthAmerica', 'MoonsightingCommittee', 'Egyptian', 'Karachi',
   'UmmAlQura', 'Dubai', 'Qatar', 'Kuwait', 'Singapore', 'Turkey', 'Tehran',
@@ -29,7 +30,7 @@ export const dataDir = resolve(process.env.ATHANBOT_DATA_DIR || defaultDataDir()
 export const defaults = {
   latitude: '', longitude: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   method: '', asr: '', highLatitude: 'MethodDefault', polar: 'Unresolved',
-  offsets: {}, audio: {}, device: 'auto', fallback: '', bluetoothAddress: '', wake: false,
+  offsets: {}, audio: {}, volumes: {}, device: 'auto', fallback: '', bluetoothAddress: '', deviceLabel: '', fallbackLabel: '', wake: false,
 };
 
 function number(value, label, min, max) {
@@ -77,10 +78,17 @@ export function validate(input) {
   }
   const offsets = {};
   const audio = {};
+  const volumes = {};
   for (const prayer of prayers) {
     const offset = number(input.offsets?.[prayer] ?? 0, `${prayer} offset`, -120, 120);
     if (!Number.isInteger(offset)) throw new Error('Offsets must be whole minutes.');
     offsets[prayer] = offset;
+    const override = input.volumes?.[prayer];
+    if (override !== undefined && override !== null && override !== '') {
+      const volume = number(override, prayer + ' volume', 0, 100);
+      if (!Number.isInteger(volume)) throw new Error('Volume must be a whole percentage.');
+      volumes[prayer] = volume;
+    }
   }
   for (const track of tracks) {
     const file = input.audio?.[track];
@@ -91,8 +99,11 @@ export function validate(input) {
     audio[track] = file;
   }
   return {
-    latitude, longitude, timeZone, method, asr, highLatitude, polar, offsets, audio,
-    ...outputSettings(input), wake: input.wake === true,
+    latitude, longitude, timeZone, method, asr, highLatitude, polar, offsets, audio, volumes,
+    ...outputSettings(input),
+    deviceLabel: typeof input.deviceLabel === 'string' ? input.deviceLabel.trim().slice(0, 200) : '',
+    fallbackLabel: typeof input.fallbackLabel === 'string' ? input.fallbackLabel.trim().slice(0, 200) : '',
+    wake: input.wake === true,
   };
 }
 

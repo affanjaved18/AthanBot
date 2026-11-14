@@ -58,7 +58,7 @@ async function main([command, arg, extra]) {
       const settings = await configured();
       const track = arg ? settings.audio[arg] || settings.audio.default : settings.audio.default;
       const file = trackPath(track);
-      await withPlaybackOutput({ ...settings, fallback: '' }, undefined, device => play(file, device));
+      await withPlaybackOutput({ ...settings, fallback: '' }, undefined, device => play(file, device, false, settings.volumes[arg]));
       break;
     }
     case 'sleep-test': {

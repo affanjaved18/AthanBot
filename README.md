@@ -6,20 +6,20 @@ Play the Athan automatically through your chosen speaker on macOS, Windows, or L
 
 ## Install
 
-Build the installer for your platform using the [appendix](#build-and-test), or use a copy you already have.
+Download the installer for your platform from [GitHub Releases](https://github.com/affanjaved18/AthanBot/releases), or [build it locally](#build-and-test).
 
 | Platform | Install | Open |
 | --- | --- | --- |
 | macOS 13.5+ | Open the `.dmg` for your Mac and drag **AthanBot** into **Applications**. | Open **AthanBot** from Applications. |
 | Windows x64 or ARM64 | Run the matching `.exe`. Install [mpv](https://mpv.io/installation/) and add the folder containing `mpv.exe` to your user `Path`. | Open **AthanBot** from Start. Setup opens in your browser. |
-| Debian or Ubuntu, amd64 or arm64 | Install the matching `.deb`, for example `sudo apt install ./athanbot_0.2.0_amd64.deb`. APT also installs mpv. | Open **AthanBot** from the app menu. Setup opens in your browser. |
+| Debian or Ubuntu, amd64 or arm64 | Install the matching `.deb`, for example `sudo apt install ./athanbot_0.3.0_amd64.deb`. APT also installs mpv. | Open **AthanBot** from the app menu. Setup opens in your browser. |
 
 For other Linux distributions, see [Run from source](#run-from-source). For a Pi without a display, see [Headless Raspberry Pi](#headless-raspberry-pi).
 
 ## Set up playback
 
-1. **Confirm prayer times.** Set your location, time zone, calculation method, and Asr convention. Compare **Preview today** with your local timetable and adjust offsets if needed.
-2. **Choose recordings.** Use the bundled library, import your own audio, or download the recommended Alafasy recording in the app. You can assign a different recording to Fajr or any other prayer.
+1. **Confirm prayer times.** Set your location, time zone, calculation method, and Asr convention. Use **Preview today** or **Preview 7 days** to check times and offsets against your local timetable.
+2. **Choose recordings.** Use the bundled library, import your own audio, or download the recommended Alafasy recording. Set a different recording or volume for each prayer. The default volume is 50%.
 3. **Choose a speaker.** Pair Bluetooth speakers in your system settings, then refresh the speaker list. Select an output and, optionally, a fallback. Use **Test playback** to check it and **Stop Athan** to end playback early. The Mac app also has **Play Athan now** for the full recording.
 4. **Save the schedule.** Select **Enable automatic startup** to run in the background now and at future sign-ins on macOS, Windows, or Linux with systemd. Keep the computer awake and signed in. The display can turn off.
 
@@ -31,7 +31,9 @@ For other Linux distributions, see [Run from source](#run-from-source). For a Pi
 
 ## Check the schedule
 
-Open **Preview today** to see prayer times. Use the commands below to check whether the scheduler is running and where to see recent playback.
+Open AthanBot to see the next prayer, saved speaker, scheduler status, and recent playback. Use **Test in 3 minutes** to verify the background scheduler with your saved settings, or **Skip next Athan** for a one-time skip.
+
+For terminal diagnostics, use the commands below.
 
 | Platform | Check the scheduler | Recent playback |
 | --- | --- | --- |
@@ -77,5 +79,7 @@ Run `npm test` from the project folder. Installers are written to `dist/`.
 | macOS `.dmg` | `./scripts/build_macos_app.sh` | Apple Command Line Tools and FFmpeg. Set `ATHANBOT_MAC_ARCH=x86_64` for Intel. Use `ATHANBOT_SIGN_IDENTITY` and `ATHANBOT_NOTARY_PROFILE` to sign and notarize. |
 | Windows `.exe` | `./scripts/build_desktop_package.sh windows x64` | NSIS 3. Use `arm64` for Windows on ARM. Bundles Node.js. |
 | Linux `.deb` | `./scripts/build_desktop_package.sh linux x64` | `dpkg-deb` or BSD tar. Use `arm64` for ARM. Bundles Node.js. |
+
+Version tags such as `v0.3.0` trigger the release workflow. GitHub publishes installers and checksums after the build and smoke checks pass.
 
 Prayer calculations use [Adhan JS](vendor/adhan/README.md). See [recording credits and licenses](audio/README.md).
