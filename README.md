@@ -1,3 +1,5 @@
+<img src="packaging/icons/athanbot.png" width="64" height="64" alt="">
+
 # AthanBot
 
 Play the Athan automatically through your chosen speaker on macOS, Windows, or Linux. AthanBot calculates all five daily prayer times offline.
@@ -31,7 +33,7 @@ For other Linux distributions, see [Run from source](#run-from-source). For a Pi
 
 ## Check the schedule
 
-Open AthanBot to see the next prayer, saved speaker, scheduler status, and recent playback. Use **Test in 3 minutes** to verify the background scheduler with your saved settings, or **Skip next Athan** for a one-time skip.
+Open **Today** to see the next prayer, saved speaker, scheduler status, and today’s times. **Schedule** has a seven-day timetable and **Skip next Athan**. **History** shows the results of recent prayers and tests. To test background playback with your saved settings, go to **Settings → Audio → Test in 3 minutes**.
 
 For terminal diagnostics, use the commands below.
 
@@ -48,7 +50,7 @@ If the scheduler is missing, open setup and save again with **Enable automatic s
 ### MacBook sleep
 
 - **Keep the Mac awake with the display off.** With the lid open and power connected, enable **System Settings → Battery → Options → Prevent automatic sleeping on power adapter when the display is off**.
-- **Try scheduled wake.** In the Mac app, choose **Schedule → Enable sleep playback**, approve the helper, then run **Test sleep playback** with your usual speaker, power source, and lid position. Turn on **Schedule Mac wake alarms** only after hearing the full Athan in the test. Scheduled wake is experimental, and macOS can wake into DarkWake with Bluetooth audio unavailable.
+- **Try scheduled wake.** In the Mac app, go to **Settings → Startup → Advanced Mac wake settings**. Choose **Enable sleep playback**, approve the helper, then run **Test sleep playback** with your usual speaker, power source, and lid position. Turn on **Schedule Mac wake alarms** only after hearing the full Athan in the test. Scheduled wake is experimental, and macOS can wake into DarkWake with Bluetooth audio unavailable.
 - **List registered wake alarms.** Run `pmset -g sched` and look for `org.athanbot.schedule`.
 
 ### Run from source

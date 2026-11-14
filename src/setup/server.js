@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { audioExtensions, defaults, highLatitudeRules, methods, outputSettings, polarRules, prayers, readSettings, saveSettings, validate } from '../settings.js';
-import { importTrack, listTracks, maxAudioBytes, normalizeOutput, outputs, pairedBluetooth, play, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
+import { importTrack, listTracks, maxAudioBytes, normalizeOutput, outputs, pairedBluetooth, play, playbackActive, stopPlayback, trackPath, withPlaybackOutput } from '../audio.js';
 import { upcomingDays } from '../prayers.js';
 import { startup, startupEnabled } from '../startup.js';
 import { scheduleSleepTest } from '../sleep.js';
@@ -20,6 +20,8 @@ const assets = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
+  '/athanbot.png': ['athanbot.png', 'image/png'],
+  '/fonts/Inter.woff2': ['fonts/Inter.woff2', 'font/woff2'],
 };
 
 async function body(stream, limit) {
@@ -70,7 +72,7 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
     response.once('close', () => { requests--; resetIdleTimer(); });
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+    response.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
     try {
       const host = '127.0.0.1:' + server.address().port;
       if (request.headers.host !== host || (request.headers.origin && request.headers.origin !== 'http://' + host)) {
@@ -107,6 +109,7 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
         return send(response, { available: await syncWake('check', []).then(() => true, () => false) });
       }
       if (url.pathname === '/devices') return send(response, await outputs());
+      if (url.pathname === '/playback-active') return send(response, { playing: await playbackActive() });
       if (url.pathname === '/status') {
         const saved = await readSettings();
         const now = Date.now();
@@ -119,7 +122,8 @@ export async function setup(port = 0, { desktop = false, idleTimeout } = {}) {
         const preferred = saved && devices?.find(device => device.id === normalizeOutput(saved.device));
         const bluetooth = paired.find(speaker => speaker.address === saved?.bluetoothAddress);
         return send(response, {
-          running, next, history, tests: tests.filter(test => !history.some(record => record.id === test.id)), timeZone: saved?.timeZone,
+          running, next, history, days: saved ? upcomingDays(saved, now, 7) : [],
+          tests: tests.filter(test => !history.some(record => record.id === test.id)), timeZone: saved?.timeZone,
           speaker: saved && {
             label: preferred?.label || bluetooth?.name || saved.deviceLabel || (saved.device === 'auto' ? 'System default' : saved.device),
             available: devices ? Boolean(preferred) : null,

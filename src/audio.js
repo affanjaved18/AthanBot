@@ -226,21 +226,32 @@ export async function withPlaybackOutput(settings, deadline, playback) {
   }
 }
 
-export async function stopPlayback() {
+async function playbackMarkers() {
   const entries = await readdir(activePlayback).catch(error => {
     if (error.code === 'ENOENT') return [];
     throw error;
   });
+  return entries.filter(entry => /^\d+-[a-f0-9-]{36}$/.test(entry));
+}
+
+function playbackOwnerAlive(entry) {
+  try {
+    process.kill(Number(entry.split('-')[0]), 0);
+    return true;
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+    return false;
+  }
+}
+
+export async function playbackActive() {
+  return (await playbackMarkers()).some(playbackOwnerAlive);
+}
+
+export async function stopPlayback() {
   let stopped = false;
-  for (const entry of entries) {
-    if (!/^\d+-[a-f0-9-]{36}$/.test(entry)) continue;
-    let alive = true;
-    try {
-      process.kill(Number(entry.split('-')[0]), 0);
-    } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
-      alive = false;
-    }
+  for (const entry of await playbackMarkers()) {
+    const alive = playbackOwnerAlive(entry);
     try {
       await unlink(join(activePlayback, entry));
       stopped ||= alive;

@@ -39,13 +39,16 @@ cp "$runtime/LICENSE" "$app/Node-LICENSE"
 if [ "$target" = windows ]; then
   cp "$runtime/node.exe" "$app/"
   artifact="$out/AthanBot-$version-windows-$arch.exe"
-  makensis "-Dstage=$app" packaging/windows/launcher.nsi
-  makensis "-Dstage=$app" "-Doutput=$artifact" "-Dversion=$version" "-Darchitecture=$arch" packaging/windows/installer.nsi
+  icon="$PWD/packaging/icons/athanbot.ico"
+  makensis "-Dstage=$app" "-Dicon=$icon" packaging/windows/launcher.nsi
+  makensis "-Dstage=$app" "-Dicon=$icon" "-Doutput=$artifact" "-Dversion=$version" "-Darchitecture=$arch" packaging/windows/installer.nsi
 else
   cp "$runtime/bin/node" "$app/"
   install -d "$work/deb/usr/bin" "$work/deb/usr/share/applications" "$work/deb/DEBIAN"
   install -m 755 packaging/linux/athanbot "$work/deb/usr/bin/athanbot"
   install -m 644 packaging/linux/athanbot.desktop "$work/deb/usr/share/applications/athanbot.desktop"
+  install -d "$work/deb/usr/share/icons/hicolor/256x256/apps"
+  install -m 644 packaging/icons/athanbot.png "$work/deb/usr/share/icons/hicolor/256x256/apps/athanbot.png"
   cat > "$work/deb/DEBIAN/control" <<CONTROL
 Package: athanbot
 Version: $version

@@ -1,4 +1,6 @@
 Unicode true
+Icon "${icon}"
+UninstallIcon "${icon}"
 !include LogicLib.nsh
 !include x64.nsh
 Name "AthanBot"
@@ -29,6 +31,7 @@ Section
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateShortCut "$SMPROGRAMS\AthanBot.lnk" "$INSTDIR\AthanBot.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot" "DisplayName" "AthanBot"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot" "DisplayIcon" "$INSTDIR\AthanBot.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot" "DisplayVersion" "${version}"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot" "NoModify" 1

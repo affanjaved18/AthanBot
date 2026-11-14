@@ -17,6 +17,12 @@ const ruleNames = {
 };
 let state;
 let page = 0;
+let view;
+let manualPlayback = false;
+let stopCheck = 0;
+let refresh = 0;
+let historyKey;
+let scheduleKey;
 let nextAthan;
 let prayerToSkip;
 const desktop = (action, data = {}) => window.webkit?.messageHandlers?.athanbot?.postMessage({ action, ...data });
@@ -28,23 +34,47 @@ function showPage(next) {
     if (Number(button.dataset.step) === page) button.setAttribute('aria-current', 'step');
     else button.removeAttribute('aria-current');
   }
-  byId('back').hidden = page === 0;
-  byId('next').hidden = page === 2;
+  const onboarding = !state.configured;
+  byId('back').hidden = !onboarding || page === 0;
+  byId('next').hidden = !onboarding || page === 2;
+  form.querySelector('[type=submit]').hidden = onboarding && page !== 2;
   window.scrollTo(0, 0);
 }
 
 function visit(next) {
-  if (next > page) {
-    for (const control of form.querySelectorAll('[data-page="0"] [required]')) {
-      if (!control.validity.valid) {
-        showPage(0);
-        control.reportValidity();
-        return;
-      }
-    }
-  }
+  if (!state.configured && next > page && !validateForm(next)) return;
   showPage(next);
-  if (next === 1) void loadPaired();
+  if (next === 1 && state.desktop) void loadPaired();
+}
+
+function validateForm(before = 3) {
+  const invalid = [...form.elements].find(control => {
+    const panel = control.closest('[data-page]');
+    return panel && Number(panel.dataset.page) < before && !control.validity.valid;
+  });
+  if (!invalid) return true;
+  showPage(Number(invalid.closest('[data-page]').dataset.page));
+  const disclosure = invalid.closest('details');
+  if (disclosure) disclosure.open = true;
+  invalid.reportValidity();
+  return false;
+}
+
+function navigate(next, focus = false) {
+  view = next;
+  for (const name of ['today', 'schedule', 'history', 'settings']) byId(name + '-view').hidden = name !== view;
+  for (const button of byId('navigation').querySelectorAll('button')) {
+    if (button.dataset.view === view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+  if (view === 'settings' && page === 1 && state.desktop) void loadPaired();
+  if (state.configured) void refreshDashboard().catch(error => status(error.message, true));
+  window.scrollTo(0, 0);
+  if (focus) {
+    const heading = byId(view + '-view').querySelector('h2');
+    heading.tabIndex = -1;
+    heading.focus();
+  }
 }
 
 async function wakeStatus() {
@@ -159,45 +189,144 @@ function speakerLabels() {
 
 const outcomes = { playing: 'Playing', played: 'Played', stopped: 'Stopped', missed: 'Missed · playback window passed', failed: 'Failed', skipped: 'Skipped once', unknown: 'Playback result unknown' };
 
-async function refreshDashboard() {
-  const { running, next, speaker, history, tests, timeZone } = await api('/status');
-  const format = new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
-  nextAthan = next;
-  byId('skip-next').hidden = !next;
-  byId('scheduler-status').textContent = running ? 'Running' : 'Waiting for scheduler check-in';
-  byId('next-prayer').textContent = next ? names[next.prayer] + ' · ' + format.format(next.at) : 'No upcoming prayer time found';
-  const availability = speaker?.available === false ? (speaker.reconnect ? ' · Connects at playback' : ' · Currently unavailable') : '';
-  byId('scheduled-speaker').textContent = speaker ? speaker.label + availability
-    + (speaker.fallback ? ' · Fallback: ' + speaker.fallback : '') : 'Choose a speaker in settings';
+const dayLabel = (day, options) => new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' })
+  .format(new Date(day + 'T12:00:00Z'));
+
+function prayerTime(at, day, timeZone) {
+  if (at === null) return 'Unavailable';
+  const time = new Intl.DateTimeFormat(undefined, { timeZone, timeStyle: 'short' }).format(at);
+  const actual = new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short' }).format(at);
+  return time + (actual > day ? ' (+1 day)' : actual < day ? ' (−1 day)' : '');
+}
+
+function renderWeek(table, days, timeZone, next) {
+  table.replaceChildren();
+  const header = table.createTHead().insertRow();
+  for (const name of ['Date', ...state.prayers.map(prayer => names[prayer])]) {
+    const cell = document.createElement('th');
+    cell.scope = 'col';
+    cell.textContent = name;
+    header.append(cell);
+  }
+  const body = table.createTBody();
+  for (const [index, events] of days.entries()) {
+    const row = body.insertRow();
+    const day = events[0].day;
+    if (!index) row.classList.add('current-day');
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.textContent = dayLabel(day, { weekday: 'short', month: 'short', day: 'numeric' });
+    row.append(label);
+    for (const event of events) {
+      const cell = row.insertCell();
+      cell.textContent = prayerTime(event.at, day, timeZone);
+      if (event.id === next?.id) {
+        cell.classList.add('next-cell');
+        cell.setAttribute('aria-label', 'Next prayer: ' + names[event.prayer] + ', ' + cell.textContent);
+      }
+    }
+  }
+}
+
+function renderHistory(history, format) {
+  const key = JSON.stringify(history) + format.resolvedOptions().timeZone;
+  if (key === historyKey) return;
+  historyKey = key;
+  const expanded = new Set([...byId('playback-history').querySelectorAll('details[open]')].map(element => element.dataset.event));
   byId('empty-history').hidden = history.length > 0;
-  byId('pending-tests').hidden = tests.length === 0;
-  byId('pending-tests').textContent = tests.map(test => test.at > Date.now()
-    ? 'Test scheduled for ' + format.format(test.at)
-    : 'Test due · waiting for scheduler').join(' · ');
-  byId('playback-history').replaceChildren(...history.map(({ prayer, at, outcome, output, detail }) => {
+  byId('playback-history').replaceChildren(...history.map(({ id, prayer, at, outcome, output, detail }) => {
     const item = document.createElement('li');
     const title = document.createElement('strong');
-    title.textContent = (names[prayer] || 'Scheduled test') + ' · ' + format.format(at);
-    const result = document.createElement('div');
-    result.textContent = outcomes[outcome] + (output ? ' · ' + output.label + (output.fallback ? ' (fallback)' : '') : '');
-    item.append(title, result);
-    if (detail) {
-      const note = document.createElement('small');
-      note.textContent = detail;
-      item.append(note);
+    title.textContent = names[prayer] || 'Scheduled test';
+    const result = document.createElement('span');
+    result.className = 'history-result';
+    result.textContent = (outcomes[outcome] || 'Unknown result')
+      + (output ? ' · ' + output.label + (output.fallback ? ' (fallback)' : '') : '');
+    const date = document.createElement('time');
+    date.dateTime = new Date(at).toISOString();
+    date.textContent = format.format(at);
+    if (detail || ['failed', 'missed', 'unknown'].includes(outcome)) {
+      const disclosure = document.createElement('details');
+      disclosure.dataset.event = id;
+      disclosure.open = expanded.has(id);
+      const summary = document.createElement('summary');
+      summary.append(title, date, result);
+      const note = document.createElement('p');
+      note.textContent = detail || (outcome === 'missed' ? 'The scheduler could not start playback within one minute of the scheduled time.' : 'No further details were recorded.');
+      disclosure.append(summary, note);
+      item.append(disclosure);
+    } else {
+      const row = document.createElement('div');
+      row.className = 'history-row';
+      row.append(title, date, result);
+      item.append(row);
     }
     return item;
   }));
 }
 
-function showDashboard() {
-  byId('dashboard').hidden = false;
-  void refreshDashboard().catch(error => status(error.message, true));
+async function refreshDashboard() {
+  const request = ++refresh;
+  const { running, next, speaker, history, tests, days, timeZone } = await api('/status');
+  if (request !== refresh || !days.length) return;
+  const format = new Intl.DateTimeFormat(undefined, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
+  const clock = new Intl.DateTimeFormat(undefined, { timeZone, timeStyle: 'short' });
+  const today = days[0][0].day;
+  nextAthan = next;
+  byId('skip-action').hidden = !next;
+  if (!next || prayerToSkip?.id !== next.id) byId('confirm-skip').hidden = true;
+  byId('today-date').textContent = dayLabel(today, { weekday: 'long', month: 'long', day: 'numeric' });
+  byId('today-zone').textContent = timeZone.replaceAll('_', ' ');
+  byId('schedule-zone').textContent = timeZone.replaceAll('_', ' ');
+  const scheduler = byId('scheduler-status');
+  scheduler.textContent = running ? 'Scheduler running' : 'Scheduler offline';
+  scheduler.classList.toggle('running', running);
+  byId('next-prayer').textContent = next ? names[next.prayer] : 'No upcoming prayer';
+  const nextDate = next && new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short' }).format(next.at);
+  byId('next-time').textContent = next ? clock.format(next.at) : '';
+  byId('next-date').textContent = nextDate && nextDate !== today
+    ? dayLabel(nextDate, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+  byId('skip-prayer').textContent = next ? names[next.prayer] + ' · ' + format.format(next.at) : '';
+  const availability = speaker?.available === false ? (speaker.reconnect ? ' · Connects at playback' : ' · Currently unavailable') : '';
+  byId('scheduled-speaker').textContent = speaker ? speaker.label + availability
+    + (speaker.fallback ? ' · Fallback: ' + speaker.fallback : '') : 'Choose a speaker in settings';
+  byId('pending-tests').hidden = tests.length === 0;
+  byId('pending-tests').textContent = tests.map(test => test.at > Date.now()
+    ? 'Test scheduled for ' + format.format(test.at)
+    : 'Test due · waiting for scheduler').join(' · ');
+  byId('today-prayers').replaceChildren(...days[0].map(event => {
+    const row = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = names[event.prayer];
+    if (event.id === next?.id) {
+      row.classList.add('current-prayer');
+      label.append(Object.assign(document.createElement('small'), { textContent: 'Next' }));
+    }
+    const time = document.createElement('span');
+    time.textContent = prayerTime(event.at, event.day, timeZone);
+    row.append(label, time);
+    return row;
+  }));
+  const key = JSON.stringify([days, timeZone, next?.id]);
+  if (key !== scheduleKey) {
+    renderWeek(byId('schedule-times'), days, timeZone, next);
+    scheduleKey = key;
+  }
+  renderHistory(history, format);
+}
+
+async function refreshStop() {
+  const check = ++stopCheck;
+  const { playing } = await api('/playback-active');
+  if (check === stopCheck) byId('stop-playback').hidden = !playing && !manualPlayback;
 }
 
 setInterval(() => {
-  if (!document.hidden && !byId('dashboard').hidden) void refreshDashboard().catch(() => {});
+  if (!document.hidden && state?.configured) void refreshDashboard().catch(() => {});
 }, 15_000);
+setInterval(() => {
+  if (!document.hidden && state) void refreshStop().catch(() => {});
+}, 2000);
 
 function audioInput() {
   return {
@@ -228,12 +357,10 @@ async function initialize() {
   field('enable').checked = (!state.configured || state.enabled) && !state.startupError;
   if (state.desktop) {
     document.body.classList.add('desktop');
-    for (const id of ['steps', 'wizard-actions', 'city-lookup', 'bluetooth-settings', 'paired-picker', 'play-now']) byId(id).hidden = false;
+    for (const id of ['city-lookup', 'bluetooth-settings', 'paired-picker', 'play-now']) byId(id).hidden = false;
     byId('bluetooth-address').hidden = true;
-    byId('mode').textContent = state.configured ? 'Settings' : 'First-time setup';
     byId('startup-note').textContent = 'Allow background playback to hear the Athan when the app window is closed. Reopen AthanBot any time to change settings.';
     form.querySelector('[type=submit]').textContent = state.configured ? 'Save changes' : 'Finish setup';
-    showPage(0);
     void wakeStatus().catch(() => { byId('install-wake').hidden = false; });
   }
   byId('mac').hidden = !state.mac;
@@ -264,18 +391,21 @@ async function initialize() {
   const outputId = id => state.desktop ? id.replace(/^avfoundation\//, 'coreaudio/') : id;
   devices(Array.isArray(state.devices) ? state.devices : [{ id: 'auto', label: 'System default' }], outputId(settings.device), outputId(settings.fallback), settings);
   byId('import').accept = state.audioExtensions.map(extension => '.' + extension).join(',');
-  form.hidden = false;
+  byId('settings-title').textContent = state.configured ? 'Settings' : 'Set up AthanBot';
+  form.querySelector('[type=submit]').textContent = state.configured ? 'Save changes' : 'Finish setup';
+  byId('navigation').hidden = !state.configured;
+  byId('scheduled-test').hidden = !state.configured;
+  showPage(0);
+  navigate(state.configured ? 'today' : 'settings');
+  void refreshStop().catch(() => {});
   const outputError = state.desktop ? 'Could not list audio outputs. Try refreshing speakers.' : 'Speaker list unavailable. Install mpv and refresh speakers.';
   const error = state.startupError || (Array.isArray(state.devices) ? '' : outputError);
   status(error, Boolean(error));
-  if (state.configured) {
-    form.hidden = true;
-    byId('steps').hidden = true;
-    showDashboard();
-  }
 }
 
-action('refresh-status', refreshDashboard);
+for (const button of byId('navigation').querySelectorAll('button')) {
+  button.addEventListener('click', () => navigate(button.dataset.view, true));
+}
 action('scheduled-test', async () => {
   await api('/scheduled-test');
   await refreshDashboard();
@@ -298,11 +428,6 @@ action('confirm-skip-button', async () => {
   await api('/skip-next', { id: prayer.id });
   await refreshDashboard();
   status('Skipped the upcoming ' + names[prayer.prayer] + ' Athan.');
-});
-byId('toggle-settings').addEventListener('click', () => {
-  form.hidden = !form.hidden;
-  byId('steps').hidden = !state.desktop || form.hidden;
-  byId('toggle-settings').textContent = form.hidden ? 'Edit settings' : 'Hide settings';
 });
 action('devices', async () => {
   devices(await api('/devices'), field('device').value, field('fallback').value, speakerLabels());
@@ -328,31 +453,7 @@ action('preview', async () => {
 action('preview-week', async () => {
   const settings = input();
   const days = await api('/preview', { ...settings, days: 7 });
-  const date = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' });
-  const format = new Intl.DateTimeFormat(undefined, { timeZone: settings.timeZone, timeStyle: 'short' });
-  const dateKey = new Intl.DateTimeFormat('sv-SE', { timeZone: settings.timeZone, dateStyle: 'short' });
-  const table = byId('weekly-times');
-  table.replaceChildren();
-  const header = table.createTHead().insertRow();
-  for (const label of ['Date', ...state.prayers.map(prayer => names[prayer])]) {
-    const cell = document.createElement('th');
-    cell.scope = 'col';
-    cell.textContent = label;
-    header.append(cell);
-  }
-  const body = table.createTBody();
-  for (const events of days) {
-    const row = body.insertRow();
-    const day = events[0].day;
-    const label = document.createElement('th');
-    label.scope = 'row';
-    label.textContent = date.format(new Date(day + 'T12:00:00Z'));
-    row.append(label);
-    for (const { at } of events) {
-      row.insertCell().textContent = at === null ? 'Unavailable' : format.format(at)
-        + (dateKey.format(at) > day ? ' (+1 day)' : dateKey.format(at) < day ? ' (−1 day)' : '');
-    }
-  }
+  renderWeek(byId('weekly-times'), days, settings.timeZone);
   byId('times').hidden = true;
   byId('weekly-preview').hidden = false;
 });
@@ -377,16 +478,22 @@ action('import', async () => {
     element.value = '';
   }
 });
-action('play', async () => {
-  status('Testing the selected speaker…');
-  const { stopped, output } = await api('/play', audioInput());
-  status(stopped ? 'Athan stopped.' : 'Test played on ' + output.label + (output.fallback ? ' (fallback).' : '.'));
-});
-action('play-now', async () => {
-  status('Preparing the selected speaker and starting playback…');
-  const { stopped } = await api('/play', { ...audioInput(), full: true });
-  status(stopped ? 'Athan stopped.' : 'Athan playback finished.');
-});
+async function previewPlayback(full) {
+  if (manualPlayback) return;
+  manualPlayback = true;
+  byId('stop-playback').hidden = false;
+  status(full ? 'Starting playback…' : 'Testing the selected speaker…');
+  try {
+    const { stopped, output } = await api('/play', { ...audioInput(), full });
+    status(stopped ? 'Athan stopped.' : 'Played on ' + output.label + (output.fallback ? ' (fallback).' : '.'));
+  } finally {
+    manualPlayback = false;
+    void refreshStop().catch(() => {});
+  }
+}
+
+action('play', () => previewPlayback(false));
+action('play-now', () => previewPlayback(true));
 action('stop-playback', async () => {
   const { stopped } = await api('/stop-playback');
   status(stopped ? 'Stop requested.' : 'No Athan is playing.');
@@ -401,19 +508,22 @@ action('sleep-status', async () => {
 });
 form.addEventListener('submit', async event => {
   event.preventDefault();
+  if (!validateForm()) return;
   const button = form.querySelector('[type=submit]');
   button.disabled = true;
   try {
     status('Saving setup…');
     const result = await api('/save', input());
     library(result.library, result.settings.audio);
-    if (state.desktop) {
-      byId('mode').textContent = 'Settings';
-      button.textContent = 'Save changes';
-    }
+    const onboarding = !state.configured;
+    state.configured = true;
+    byId('navigation').hidden = false;
+    byId('scheduled-test').hidden = false;
+    byId('settings-title').textContent = 'Settings';
+    button.textContent = 'Save changes';
     status(field('enable').checked ? 'Settings saved and automatic startup enabled.' : 'Settings saved.');
-    byId('toggle-settings').textContent = 'Hide settings';
-    showDashboard();
+    showPage(page);
+    navigate(onboarding ? 'today' : 'settings');
   } catch (error) {
     status(error.message, true);
   } finally {

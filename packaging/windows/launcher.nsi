@@ -1,4 +1,5 @@
 Unicode true
+Icon "${icon}"
 Name "AthanBot"
 OutFile "${stage}/AthanBot.exe"
 RequestExecutionLevel user

@@ -47,8 +47,10 @@ cache="$out/.swift-cache"
 swiftc -target "$target" -module-cache-path "$cache" -O macos/App.swift -o "$mac/AthanBot"
 swiftc -target "$target" -module-cache-path "$cache" -O macos/Audio.swift -o "$mac/athanbot-audio"
 swiftc -target "$target" -module-cache-path "$cache" -O scripts/mac-wake.swift -o "$mac/athanbot-wake"
-swiftc -module-cache-path "$cache" macos/Icon.swift -o "$work/icon"
-"$work/icon" "$work/AthanBot.iconset"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" src/setup/athanbot.png --out "$work/AthanBot.iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z "$((size * 2))" "$((size * 2))" src/setup/athanbot.png --out "$work/AthanBot.iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
 iconutil --convert icns --output "$resources/AthanBot.icns" "$work/AthanBot.iconset"
 
 identity=${ATHANBOT_SIGN_IDENTITY:--}

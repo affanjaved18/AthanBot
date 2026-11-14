@@ -154,11 +154,13 @@ esac
   await writeFile(join(directory, 'hold-playback'), '');
   const playing = play(true);
   await waitForPlayer();
+  assert.deepEqual(await (await call('/playback-active')).json(), { playing: true });
   assert.equal((await call('/stop-playback', null, false)).status, 403);
   assert.deepEqual(await (await call('/stop-playback')).json(), { stopped: true });
   assert.deepEqual(await (await playing).json(), {
     ok: true, stopped: true, output: { id: 'pipewire/test', label: 'Test speaker', fallback: false },
   });
+  assert.deepEqual(await (await call('/playback-active')).json(), { playing: false });
 
   const audioModule = new URL('../src/audio.js', import.meta.url).href;
   const background = promisify(execFile)(process.execPath, ['--input-type=module', '-e', `

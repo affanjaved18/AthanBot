@@ -3,5 +3,6 @@ Type=Application
 Name=AthanBot
 Comment=Play the Athan at local prayer times
 Exec=athanbot
+Icon=athanbot
 Terminal=false
 Categories=AudioVideo;Audio;
