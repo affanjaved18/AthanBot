@@ -36,14 +36,18 @@ Section
 SectionEnd
 
 Section "Uninstall"
-  nsExec::Exec '"$INSTDIR\node.exe" "$INSTDIR\src\main.js" disable'
+  nsExec::ExecToStack '"$INSTDIR\node.exe" "$INSTDIR\src\main.js" disable'
   Pop $0
-  StrCmp $0 "0" +2
-  Abort "AthanBot could not remove its scheduled task."
+  Pop $1
+  StrCmp $0 "0" +3
+  SetErrorLevel 2
+  Abort "AthanBot could not remove its scheduled task ($0). $1"
   SetOutPath "$TEMP"
+  ClearErrors
   Delete "$INSTDIR\AthanBot.exe"
   Delete "$INSTDIR\node.exe"
-  IfErrors 0 +2
+  IfErrors 0 +3
+  SetErrorLevel 3
   Abort "Close AthanBot and try again."
   Delete "$SMPROGRAMS\AthanBot.lnk"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AthanBot"

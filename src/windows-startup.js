@@ -7,32 +7,44 @@ function encode(script) {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-async function task(script, env = process.env) {
+async function task(script, env = process.env, timeout = 30_000) {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
   const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const { stdout } = await run(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encode(`
 $ErrorActionPreference = 'Stop'
 $user = [Security.Principal.WindowsIdentity]::GetCurrent()
 $name = 'AthanBot-' + $user.User.Value
-$task = Get-ScheduledTask -TaskPath '\\' | Where-Object { $_.TaskName -eq $name }
 ${script}
-  `)], { env, windowsHide: true, timeout: 30000 });
+  `)], { env, windowsHide: true, timeout });
   return stdout.trim();
 }
 
+const findTask = `
+$scheduler = New-Object -ComObject Schedule.Service
+$scheduler.Connect()
+$folder = $scheduler.GetFolder('\\')
+$task = $null
+try {
+  $task = $folder.GetTask($name)
+} catch {
+  # 0x80070002 is ERROR_FILE_NOT_FOUND from Task Scheduler.
+  if ($_.Exception.GetBaseException().HResult -ne -2147024894) { throw }
+}
+`;
+
 export async function windowsStartupEnabled() {
-  return await task("if ($task -and $task.State -ne 'Disabled') { 'enabled' }") === 'enabled';
+  return await task(findTask + "if ($task -and $task.Enabled) { 'enabled' }") === 'enabled';
 }
 
 export async function windowsStartup(entry, enable) {
   if (!enable) {
-    await task(`
+    await task(findTask + `
 if ($task) {
-  Disable-ScheduledTask -TaskName $name | Out-Null
-  if ($task.State -eq 'Running') { Stop-ScheduledTask -TaskName $name }
-  Unregister-ScheduledTask -TaskName $name -Confirm:$false
+  $task.Enabled = $false
+  if ($task.State -eq 4) { $task.Stop(0) }
+  $folder.DeleteTask($name, 0)
 }
-    `);
+    `, process.env, 90_000);
     return;
   }
   await mkdir(dataDir, { recursive: true });
@@ -48,6 +60,7 @@ $env:ATHANBOT_MPV = $config.player
 exit $LASTEXITCODE
   `;
   await task(`
+$task = Get-ScheduledTask -TaskPath '\\' | Where-Object { $_.TaskName -eq $name }
 $arguments = $env:ATHANBOT_TASK_ARGUMENTS
 $execute = "$PSHOME\\powershell.exe"
 if (!$task -or @($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ne $execute -or $task.Actions[0].Arguments -cne $arguments) {
