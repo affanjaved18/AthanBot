@@ -12,9 +12,16 @@ async function task(script, env = process.env, timeout = 30_000) {
   const powershell = join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const { stdout } = await run(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encode(`
 $ErrorActionPreference = 'Stop'
-$user = [Security.Principal.WindowsIdentity]::GetCurrent()
-$name = 'AthanBot-' + $user.User.Value
-${script}
+$ProgressPreference = 'SilentlyContinue'
+try {
+  $user = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $name = 'AthanBot-' + $user.User.Value
+  ${script}
+} catch {
+  [Console]::Error.WriteLine($_.Exception.GetBaseException().ToString())
+  exit 1
+}
+exit 0
   `)], { env, windowsHide: true, timeout });
   return stdout.trim();
 }
@@ -23,13 +30,7 @@ const findTask = `
 $scheduler = New-Object -ComObject Schedule.Service
 $scheduler.Connect()
 $folder = $scheduler.GetFolder('\\')
-$task = $null
-try {
-  $task = $folder.GetTask($name)
-} catch {
-  # 0x80070002 is ERROR_FILE_NOT_FOUND from Task Scheduler.
-  if ($_.Exception.GetBaseException().HResult -ne -2147024894) { throw }
-}
+$task = $folder.GetTasks(1) | Where-Object Name -eq $name | Select-Object -First 1
 `;
 
 export async function windowsStartupEnabled() {

@@ -12,7 +12,7 @@ Download the installer for your platform from [GitHub Releases](https://github.c
 | --- | --- | --- |
 | macOS 13.5+ | Open the `.dmg` for your Mac and drag **AthanBot** into **Applications**. | Open **AthanBot** from Applications. |
 | Windows x64 or ARM64 | Run the matching `.exe`. Install [mpv](https://mpv.io/installation/) and add the folder containing `mpv.exe` to your user `Path`. | Open **AthanBot** from Start. Setup opens in your browser. |
-| Debian or Ubuntu, amd64 or arm64 | Install the matching `.deb`, for example `sudo apt install ./athanbot_0.3.1_amd64.deb`. APT also installs mpv. | Open **AthanBot** from the app menu. Setup opens in your browser. |
+| Debian or Ubuntu, amd64 or arm64 | Install the matching `.deb`, for example `sudo apt install ./athanbot_0.3.2_amd64.deb`. APT also installs mpv. | Open **AthanBot** from the app menu. Setup opens in your browser. |
 
 For other Linux distributions, see [Run from source](#run-from-source). For a Pi without a display, see [Headless Raspberry Pi](#headless-raspberry-pi).
 
@@ -80,6 +80,6 @@ Run `npm test` from the project folder. Installers are written to `dist/`.
 | Windows `.exe` | `./scripts/build_desktop_package.sh windows x64` | NSIS 3. Use `arm64` for Windows on ARM. Bundles Node.js. |
 | Linux `.deb` | `./scripts/build_desktop_package.sh linux x64` | `dpkg-deb` or BSD tar. Use `arm64` for ARM. Bundles Node.js. |
 
-Version tags such as `v0.3.1` trigger the release workflow. GitHub publishes installers and checksums after the build and smoke checks pass.
+Version tags such as `v0.3.2` trigger the release workflow. GitHub publishes installers and checksums after the build and smoke checks pass.
 
 Prayer calculations use [Adhan JS](vendor/adhan/README.md). See [recording credits and licenses](audio/README.md).
